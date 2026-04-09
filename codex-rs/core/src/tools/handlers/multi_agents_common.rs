@@ -1,4 +1,5 @@
 use crate::agent::AgentStatus;
+use crate::agent::role::apply_role_to_config;
 use crate::codex::Session;
 use crate::codex::TurnContext;
 use crate::config::Config;
@@ -220,18 +221,42 @@ pub(crate) fn build_agent_resume_config(
     Ok(config)
 }
 
+pub(crate) async fn validate_agent_role_config(
+    config: &Config,
+    role_name: Option<&str>,
+) -> Result<(), FunctionCallError> {
+    let mut role_config = config.clone();
+    apply_role_to_config(&mut role_config, role_name)
+        .await
+        .map_err(FunctionCallError::RespondToModel)
+}
+
 fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallError> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
     config.model = Some(turn.model_info.slug.clone());
     config.model_provider = turn.provider.clone();
-    config.model_reasoning_effort = turn.reasoning_effort;
+    config.model_reasoning_effort = turn
+        .reasoning_effort
+        .or(turn.model_info.default_reasoning_level);
     config.model_reasoning_summary = Some(turn.reasoning_summary);
     config.developer_instructions = turn.developer_instructions.clone();
     config.compact_prompt = turn.compact_prompt.clone();
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
 
     Ok(config)
+}
+
+pub(crate) fn reject_forked_spawn_model_overrides(
+    model: Option<&str>,
+    reasoning_effort: Option<ReasoningEffort>,
+) -> Result<(), FunctionCallError> {
+    if model.is_some() || reasoning_effort.is_some() {
+        return Err(FunctionCallError::RespondToModel(
+            "Forked agents inherit the parent model and reasoning effort; omit model and reasoning_effort, or spawn without fork_context/fork_turns.".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Copies runtime-only turn state onto a child config before it is handed to `AgentControl`.
