@@ -5602,7 +5602,7 @@ impl CodexMessageProcessor {
     }
 
     async fn unload_thread_without_subscribers(
-        &mut self,
+        &self,
         thread_id: ThreadId,
         thread: Arc<CodexThread>,
     ) {
