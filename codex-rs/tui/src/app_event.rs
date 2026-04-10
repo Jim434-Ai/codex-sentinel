@@ -563,6 +563,7 @@ pub(crate) enum AppEvent {
     SubmitFeedback {
         category: FeedbackCategory,
         reason: Option<String>,
+        turn_id: Option<String>,
         include_logs: bool,
     },
 

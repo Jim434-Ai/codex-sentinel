@@ -244,6 +244,7 @@ use codex_features::FEATURES;
 use codex_features::Feature;
 use codex_features::Stage;
 use codex_feedback::CodexFeedback;
+use codex_feedback::FeedbackUploadOptions;
 use codex_git_utils::git_diff_to_remote;
 use codex_git_utils::resolve_root_git_project_for_trust;
 use codex_login::AuthManager;
@@ -7821,6 +7822,7 @@ impl CodexMessageProcessor {
             classification,
             reason,
             thread_id,
+            turn_id,
             include_logs,
             extra_log_files,
         } = params;
@@ -7950,14 +7952,15 @@ impl CodexMessageProcessor {
         let session_source = self.thread_manager.session_source();
 
         let upload_result = tokio::task::spawn_blocking(move || {
-            snapshot.upload_feedback(
-                &classification,
-                reason.as_deref(),
+            snapshot.upload_feedback(FeedbackUploadOptions {
+                classification: &classification,
+                reason: reason.as_deref(),
+                turn_id: turn_id.as_deref(),
                 include_logs,
-                &attachment_paths,
-                Some(session_source),
-                sqlite_feedback_logs,
-            )
+                extra_attachment_paths: &attachment_paths,
+                session_source: Some(session_source),
+                logs_override: sqlite_feedback_logs,
+            })
         })
         .await;
 
