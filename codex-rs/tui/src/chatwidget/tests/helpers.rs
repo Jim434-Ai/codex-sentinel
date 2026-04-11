@@ -193,6 +193,7 @@ pub(super) async fn make_chatwidget_manual(
         session_telemetry,
         session_header: SessionHeader::new(resolved_model.clone()),
         initial_user_message: None,
+        specialist_session: None,
         status_account_display: None,
         token_info: None,
         rate_limit_snapshots_by_limit_id: BTreeMap::new(),

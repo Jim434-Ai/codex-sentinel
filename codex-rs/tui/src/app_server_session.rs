@@ -68,6 +68,7 @@ use codex_app_server_protocol::TurnSteerResponse;
 use codex_core::append_message_history_entry;
 use codex_core::config::Config;
 use codex_core::message_history_metadata;
+use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ModelAvailabilityNux;
@@ -182,24 +183,19 @@ impl AppServerSession {
 
     pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppServerBootstrap> {
         let account = self.read_account().await?;
-        let model_request_id = self.next_request_id();
-        let models: ModelListResponse = self
-            .client
-            .request_typed(ClientRequest::ModelList {
-                request_id: model_request_id,
-                params: ModelListParams {
-                    cursor: None,
-                    limit: None,
-                    include_hidden: Some(true),
-                },
-            })
-            .await
-            .wrap_err("model/list failed during TUI bootstrap")?;
-        let available_models = models
-            .data
-            .into_iter()
-            .map(model_preset_from_api_model)
-            .collect::<Vec<_>>();
+        let available_models =
+            if !self.is_remote() && config.model_provider_id == OLLAMA_OSS_PROVIDER_ID {
+                match crate::ollama_model_picker::embedded_ollama_model_presets(config).await {
+                    Ok(models) if !models.is_empty() => models,
+                    Ok(_) => self.list_available_models().await?,
+                    Err(err) => {
+                        tracing::warn!("failed to load embedded Ollama models for picker: {err}");
+                        self.list_available_models().await?
+                    }
+                }
+            } else {
+                self.list_available_models().await?
+            };
         let default_model = config
             .model
             .clone()
@@ -259,6 +255,27 @@ impl AppServerSession {
             has_chatgpt_account,
             available_models,
         })
+    }
+
+    async fn list_available_models(&mut self) -> Result<Vec<ModelPreset>> {
+        let model_request_id = self.next_request_id();
+        let models: ModelListResponse = self
+            .client
+            .request_typed(ClientRequest::ModelList {
+                request_id: model_request_id,
+                params: ModelListParams {
+                    cursor: None,
+                    limit: None,
+                    include_hidden: Some(true),
+                },
+            })
+            .await
+            .wrap_err("model/list failed during TUI bootstrap")?;
+        Ok(models
+            .data
+            .into_iter()
+            .map(model_preset_from_api_model)
+            .collect())
     }
 
     /// Fetches the current account info without refreshing the auth token.

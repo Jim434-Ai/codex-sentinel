@@ -82,6 +82,9 @@ pub struct Cli {
     #[arg(long = "output-schema", value_name = "FILE")]
     pub output_schema: Option<PathBuf>,
 
+    #[command(flatten)]
+    pub specialist: SpecialistArgs,
+
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 
@@ -112,6 +115,25 @@ pub struct Cli {
     /// a prompt is also provided, stdin is appended as a `<stdin>` block.
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     pub prompt: Option<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct SpecialistArgs {
+    /// Run the session as a specialist workspace using .codex/workspace.toml.
+    #[arg(long = "specialist", global = true, default_value_t = false)]
+    pub specialist: bool,
+
+    /// Path to the committed specialist workspace manifest.
+    #[arg(long = "workspace-manifest", global = true, value_name = "FILE")]
+    pub workspace_manifest: Option<PathBuf>,
+
+    /// Path to the local-only machine profile that resolves logical roots.
+    #[arg(long = "machine-profile", global = true, value_name = "FILE")]
+    pub machine_profile: Option<PathBuf>,
+
+    /// Named context set to preload for the specialist run.
+    #[arg(long = "context-set", global = true, value_name = "NAME")]
+    pub context_set: Option<String>,
 }
 
 #[derive(Debug, clap::Subcommand)]

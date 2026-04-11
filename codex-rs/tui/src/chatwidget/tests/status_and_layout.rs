@@ -132,6 +132,7 @@ async fn helpers_are_available_and_do_not_panic() {
         status_account_display: None,
         initial_plan_type: None,
         model: Some(resolved_model),
+        specialist_session: None,
         startup_tooltip_override: None,
         status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
         terminal_title_invalid_items_warned: Arc::new(AtomicBool::new(false)),

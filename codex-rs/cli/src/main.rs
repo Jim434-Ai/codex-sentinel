@@ -39,10 +39,14 @@ mod app_cmd;
 #[cfg(target_os = "macos")]
 mod desktop_app;
 mod mcp_cmd;
+mod specialist_cmd;
+mod specialist_init;
 #[cfg(not(windows))]
 mod wsl_paths;
 
 use crate::mcp_cmd::McpCli;
+use crate::specialist_cmd::SpecialistCli;
+use crate::specialist_cmd::run_specialist_command;
 
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -137,6 +141,9 @@ enum Subcommand {
 
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
+
+    /// Specialist workflow helpers for durable workspace/context state.
+    Specialist(SpecialistCli),
 
     /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
@@ -802,6 +809,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             .await?;
             handle_app_exit(exit_info)?;
         }
+        Some(Subcommand::Specialist(specialist_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "specialist",
+            )?;
+            run_specialist_command(specialist_cli)?;
+        }
         Some(Subcommand::Login(mut login_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -1448,6 +1463,18 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
     if !subcommand_cli.add_dir.is_empty() {
         interactive.add_dir.extend(subcommand_cli.add_dir);
     }
+    if subcommand_cli.specialist.specialist {
+        interactive.specialist.specialist = true;
+    }
+    if let Some(workspace_manifest) = subcommand_cli.specialist.workspace_manifest {
+        interactive.specialist.workspace_manifest = Some(workspace_manifest);
+    }
+    if let Some(machine_profile) = subcommand_cli.specialist.machine_profile {
+        interactive.specialist.machine_profile = Some(machine_profile);
+    }
+    if let Some(context_set) = subcommand_cli.specialist.context_set {
+        interactive.specialist.context_set = Some(context_set);
+    }
     if let Some(prompt) = subcommand_cli.prompt {
         // Normalize CRLF/CR to LF so CLI-provided text can't leak `\r` into TUI state.
         interactive.prompt = Some(prompt.replace("\r\n", "\n").replace('\r', "\n"));
@@ -1528,6 +1555,31 @@ mod tests {
         };
 
         finalize_fork_interactive(interactive, root_overrides, session_id, last, all, fork_cli)
+    }
+
+    #[test]
+    fn finalize_resume_preserves_specialist_flags() {
+        let interactive = finalize_resume_from_args(&[
+            "codex",
+            "--specialist",
+            "--workspace-manifest",
+            "/tmp/root/.codex/workspace.toml",
+            "resume",
+            "--last",
+            "--context-set",
+            "intake",
+            "continue",
+        ]);
+
+        assert!(interactive.specialist.specialist);
+        assert_eq!(
+            interactive.specialist.workspace_manifest,
+            Some(std::path::PathBuf::from("/tmp/root/.codex/workspace.toml"))
+        );
+        assert_eq!(
+            interactive.specialist.context_set.as_deref(),
+            Some("intake")
+        );
     }
 
     #[test]

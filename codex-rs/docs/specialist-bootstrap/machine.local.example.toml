@@ -1,0 +1,4 @@
+[roots]
+workspace_root = "/absolute/path/to/workspace"
+source_primary_root = "/absolute/path/to/source-folder"
+deliverables_root = "/absolute/path/to/workspace/Deliverables"

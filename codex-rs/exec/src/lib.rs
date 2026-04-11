@@ -9,6 +9,7 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
 pub(crate) mod exec_events;
+mod specialist;
 
 pub use cli::Cli;
 pub use cli::Command;
@@ -141,6 +142,7 @@ use uuid::Uuid;
 
 use crate::cli::Command as ExecCommand;
 use crate::event_processor::EventProcessor;
+use codex_specialist::SpecialistSession;
 
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
 
@@ -196,6 +198,7 @@ struct ExecRunArgs {
     output_schema_path: Option<PathBuf>,
     prompt: Option<String>,
     skip_git_repo_check: bool,
+    specialist: Option<SpecialistSession>,
     stderr_with_ansi: bool,
 }
 
@@ -232,6 +235,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         sandbox_mode: sandbox_mode_cli_arg,
         prompt,
         output_schema: output_schema_path,
+        specialist,
         config_overrides,
     } = cli;
 
@@ -274,10 +278,19 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         }
     };
 
-    let resolved_cwd = cwd.clone();
-    let config_cwd = match resolved_cwd.as_deref() {
+    let requested_cwd = match cwd.as_deref() {
         Some(path) => AbsolutePathBuf::from_absolute_path(path.canonicalize()?)?,
         None => AbsolutePathBuf::current_dir()?,
+    };
+    let mut specialist =
+        specialist::resolve_specialist_session(requested_cwd.as_path(), &specialist)?;
+    let resolved_cwd = specialist
+        .as_ref()
+        .map(|specialist| specialist.workspace_root.clone())
+        .or(cwd.clone());
+    let config_cwd = match resolved_cwd.as_deref() {
+        Some(path) => AbsolutePathBuf::from_absolute_path(path.canonicalize()?)?,
+        None => requested_cwd.clone(),
     };
 
     // we load config.toml here to determine project state.
@@ -390,12 +403,16 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         additional_writable_roots: add_dir,
     };
 
-    let config = ConfigBuilder::default()
+    let mut config = ConfigBuilder::default()
         .cli_overrides(cli_kv_overrides)
         .harness_overrides(overrides)
         .cloud_requirements(cloud_requirements)
         .build()
         .await?;
+    if let Some(specialist) = specialist.as_mut() {
+        codex_specialist::refresh_specialist_runtime_state(specialist, &config.codex_home)?;
+        crate::specialist::apply_specialist_config(&mut config, specialist)?;
+    }
 
     #[allow(clippy::print_stderr)]
     match check_execpolicy_for_warnings(&config.config_layer_stack).await {
@@ -494,6 +511,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         output_schema_path,
         prompt,
         skip_git_repo_check,
+        specialist,
         stderr_with_ansi,
     })
     .instrument(exec_span)
@@ -515,6 +533,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         output_schema_path,
         prompt,
         skip_git_repo_check,
+        mut specialist,
         stderr_with_ansi,
     } = args;
 
@@ -607,10 +626,28 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             )
         }
     };
+    let initial_operation = match initial_operation {
+        InitialOperation::UserTurn {
+            items,
+            output_schema,
+        } => {
+            let items = if let Some(specialist) = specialist.as_ref() {
+                crate::specialist::inject_specialist_prompt(items, specialist)?
+            } else {
+                items
+            };
+            InitialOperation::UserTurn {
+                items,
+                output_schema,
+            }
+        }
+        InitialOperation::Review { review_request } => InitialOperation::Review { review_request },
+    };
 
     // When --yolo (dangerously_bypass_approvals_and_sandbox) is set, also skip the git repo check
     // since the user is explicitly running in an externally sandboxed environment.
     if !skip_git_repo_check
+        && specialist.is_none()
         && !dangerously_bypass_approvals_and_sandbox
         && get_git_repo_root(&default_cwd).is_none()
     {
@@ -714,10 +751,14 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     params: TurnStartParams {
                         thread_id: primary_thread_id_for_span.clone(),
                         input: items.into_iter().map(Into::into).collect(),
-                        cwd: Some(default_cwd),
+                        cwd: Some(default_cwd.clone()),
                         approval_policy: Some(default_approval_policy.into()),
                         approvals_reviewer: None,
-                        sandbox_policy: Some(default_sandbox_policy.clone().into()),
+                        sandbox_policy: if specialist.is_some() {
+                            None
+                        } else {
+                            Some(default_sandbox_policy.clone().into())
+                        },
                         model: None,
                         service_tier: None,
                         effort: default_effort,
@@ -856,6 +897,44 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             }
             InProcessServerEvent::Lagged { skipped } => {
                 let message = lagged_event_warning_message(skipped);
+                warn!("{message}");
+                event_processor.process_warning(message);
+            }
+        }
+    }
+
+    if !config.ephemeral
+        && let Some(specialist) = specialist.as_mut()
+    {
+        match send_request_with_response::<ThreadReadResponse>(
+            &client,
+            ClientRequest::ThreadRead {
+                request_id: request_ids.next(),
+                params: ThreadReadParams {
+                    thread_id: primary_thread_id_for_requests.clone(),
+                    include_turns: true,
+                },
+            },
+            "thread/read",
+        )
+        .await
+        {
+            Ok(response) => {
+                if let Err(err) = crate::specialist::write_specialist_checkpoint(
+                    &config.codex_home,
+                    specialist,
+                    &response.thread,
+                    &task_id,
+                    &prompt_summary,
+                ) {
+                    let message = format!("failed to write specialist checkpoint: {err}");
+                    warn!("{message}");
+                    event_processor.process_warning(message);
+                }
+            }
+            Err(err) => {
+                let message =
+                    format!("thread/read failed while writing specialist checkpoint: {err}");
                 warn!("{message}");
                 event_processor.process_warning(message);
             }

@@ -107,6 +107,9 @@ pub struct Cli {
     #[arg(long = "add-dir", value_name = "DIR", value_hint = ValueHint::DirPath)]
     pub add_dir: Vec<PathBuf>,
 
+    #[command(flatten)]
+    pub specialist: SpecialistArgs,
+
     /// Disable alternate screen mode
     ///
     /// Runs the TUI in inline mode, preserving terminal scrollback history. This is useful
@@ -117,4 +120,23 @@ pub struct Cli {
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct SpecialistArgs {
+    /// Run the session as a specialist workspace using .codex/workspace.toml.
+    #[arg(long = "specialist", default_value_t = false)]
+    pub specialist: bool,
+
+    /// Path to the committed specialist workspace manifest.
+    #[arg(long = "workspace-manifest", value_name = "FILE")]
+    pub workspace_manifest: Option<PathBuf>,
+
+    /// Path to the local-only machine profile that resolves logical roots.
+    #[arg(long = "machine-profile", value_name = "FILE")]
+    pub machine_profile: Option<PathBuf>,
+
+    /// Named context set to preload for the specialist run.
+    #[arg(long = "context-set", value_name = "NAME")]
+    pub context_set: Option<String>,
 }

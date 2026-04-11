@@ -216,6 +216,7 @@ use codex_protocol::request_user_input::RequestUserInputEvent;
 use codex_protocol::request_user_input::RequestUserInputQuestionOption;
 use codex_protocol::user_input::TextElement;
 use codex_protocol::user_input::UserInput;
+use codex_specialist::SpecialistSession;
 use codex_terminal_detection::Multiplexer;
 use codex_terminal_detection::TerminalInfo;
 use codex_terminal_detection::TerminalName;
@@ -559,6 +560,7 @@ pub(crate) struct ChatWidgetInit {
     pub(crate) status_account_display: Option<StatusAccountDisplay>,
     pub(crate) initial_plan_type: Option<PlanType>,
     pub(crate) model: Option<String>,
+    pub(crate) specialist_session: Option<SpecialistSession>,
     pub(crate) startup_tooltip_override: Option<String>,
     // Shared latch so we only warn once about invalid status-line item IDs.
     pub(crate) status_line_invalid_items_warned: Arc<AtomicBool>,
@@ -762,6 +764,7 @@ pub(crate) struct ChatWidget {
     session_telemetry: SessionTelemetry,
     session_header: SessionHeader,
     initial_user_message: Option<UserMessage>,
+    specialist_session: Option<SpecialistSession>,
     status_account_display: Option<StatusAccountDisplay>,
     token_info: Option<TokenUsageInfo>,
     rate_limit_snapshots_by_limit_id: BTreeMap<String, RateLimitSnapshotDisplay>,
@@ -4562,6 +4565,7 @@ impl ChatWidget {
             status_account_display,
             initial_plan_type,
             model,
+            specialist_session,
             startup_tooltip_override,
             status_line_invalid_items_warned,
             terminal_title_invalid_items_warned,
@@ -4625,6 +4629,7 @@ impl ChatWidget {
             session_telemetry,
             session_header: SessionHeader::new(header_model),
             initial_user_message,
+            specialist_session,
             status_account_display,
             token_info: None,
             rate_limit_snapshots_by_limit_id: BTreeMap::new(),
@@ -5730,6 +5735,18 @@ impl ChatWidget {
                     name: app.name.clone(),
                     path: format!("app://{app_id}"),
                 });
+            }
+        }
+
+        if let Some(specialist_session) = self.specialist_session.as_ref() {
+            match codex_specialist::inject_specialist_prompt(items, specialist_session) {
+                Ok(specialist_items) => items = specialist_items,
+                Err(err) => {
+                    self.add_error_message(format!(
+                        "Failed to prepare specialist workspace prompt: {err}"
+                    ));
+                    return;
+                }
             }
         }
 
@@ -9441,6 +9458,10 @@ impl ChatWidget {
             mask.reasoning_effort = Some(effort);
         }
         self.refresh_model_dependent_surfaces();
+    }
+
+    pub(crate) fn set_specialist_session(&mut self, specialist_session: Option<SpecialistSession>) {
+        self.specialist_session = specialist_session;
     }
 
     /// Set the personality in the widget's config copy.

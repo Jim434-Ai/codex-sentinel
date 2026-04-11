@@ -53,3 +53,35 @@ fn resume_accepts_output_last_message_flag_after_subcommand() {
     assert_eq!(args.session_id.as_deref(), Some("session-123"));
     assert_eq!(args.prompt.as_deref(), Some(PROMPT));
 }
+
+#[test]
+fn resume_accepts_specialist_flags_after_subcommand() {
+    let cli = Cli::parse_from([
+        "codex-exec",
+        "resume",
+        "--last",
+        "--specialist",
+        "--workspace-manifest",
+        "/tmp/workspace/.codex/workspace.toml",
+        "--machine-profile",
+        "/tmp/workspace/.codex/machine.local.toml",
+        "--context-set",
+        "core",
+        "Continue the plan",
+    ]);
+
+    assert!(cli.specialist.specialist);
+    assert_eq!(
+        cli.specialist.workspace_manifest,
+        Some(PathBuf::from("/tmp/workspace/.codex/workspace.toml"))
+    );
+    assert_eq!(
+        cli.specialist.machine_profile,
+        Some(PathBuf::from("/tmp/workspace/.codex/machine.local.toml"))
+    );
+    assert_eq!(cli.specialist.context_set.as_deref(), Some("core"));
+    let Some(Command::Resume(args)) = cli.command else {
+        panic!("expected resume command");
+    };
+    assert_eq!(args.prompt.as_deref(), Some("Continue the plan"));
+}

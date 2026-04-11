@@ -1,0 +1,24 @@
+workspace_id = "example-workspace"
+issue_id = "example-issue"
+default_context_set = "core"
+
+[roles.workspace]
+root = "workspace_root"
+access = "read-write"
+
+[roles.source_primary]
+root = "source_primary_root"
+access = "read-only"
+
+[roles.deliverables]
+root = "deliverables_root"
+access = "read-write"
+
+[context_sets.core]
+files = [
+  { role = "workspace", path = "AGENTS.md" },
+  { role = "workspace", path = ".codex/issue.md" },
+]
+
+# Add this only if `.codex/soul.md` actually exists:
+# { role = "workspace", path = ".codex/soul.md" },

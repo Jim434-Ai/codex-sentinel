@@ -82,6 +82,7 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadRollbackResponse;
 use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnError as AppServerTurnError;
 use codex_app_server_protocol::TurnStatus;
 use codex_config::types::ApprovalsReviewer;
@@ -122,6 +123,7 @@ use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SkillErrorInfo;
 use codex_protocol::protocol::TokenUsage;
+use codex_specialist::SpecialistSession;
 use codex_terminal_detection::user_agent;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use color_eyre::eyre::Result;
@@ -946,6 +948,7 @@ pub(crate) struct App {
     pub(crate) chat_widget: ChatWidget,
     /// Config is stored here so we can recreate ChatWidgets as needed.
     pub(crate) config: Config,
+    specialist_session: Option<SpecialistSession>,
     pub(crate) active_profile: Option<String>,
     cli_kv_overrides: Vec<(String, TomlValue)>,
     harness_overrides: ConfigOverrides,
@@ -1095,6 +1098,7 @@ impl App {
             status_account_display: self.chat_widget.status_account_display().cloned(),
             initial_plan_type: self.chat_widget.current_plan_type(),
             model: Some(self.chat_widget.current_model().to_string()),
+            specialist_session: self.specialist_session.clone(),
             startup_tooltip_override: None,
             status_line_invalid_items_warned: self.status_line_invalid_items_warned.clone(),
             terminal_title_invalid_items_warned: self.terminal_title_invalid_items_warned.clone(),
@@ -1106,13 +1110,15 @@ impl App {
         let mut overrides = self.harness_overrides.clone();
         overrides.cwd = Some(cwd.clone());
         let cwd_display = cwd.display().to_string();
-        ConfigBuilder::default()
+        let mut config = ConfigBuilder::default()
             .codex_home(self.config.codex_home.clone())
             .cli_overrides(self.cli_kv_overrides.clone())
             .harness_overrides(overrides)
             .build()
             .await
-            .wrap_err_with(|| format!("Failed to rebuild config for cwd {cwd_display}"))
+            .wrap_err_with(|| format!("Failed to rebuild config for cwd {cwd_display}"))?;
+        self.apply_specialist_config(&mut config)?;
+        Ok(config)
     }
 
     async fn refresh_in_memory_config_from_disk(&mut self) -> Result<()> {
@@ -1123,6 +1129,68 @@ impl App {
         self.config = config;
         self.chat_widget.sync_plugin_mentions_config(&self.config);
         Ok(())
+    }
+
+    fn apply_specialist_config(&self, config: &mut Config) -> Result<()> {
+        if let Some(specialist_session) = self.specialist_session.as_ref() {
+            codex_specialist::apply_specialist_config(config, specialist_session)
+                .map_err(|err| color_eyre::eyre::eyre!("{err}"))?;
+        }
+        Ok(())
+    }
+
+    async fn write_specialist_checkpoint_for_notification(
+        &mut self,
+        app_server: &mut AppServerSession,
+        notification: &TurnCompletedNotification,
+    ) {
+        let Some(thread_id) = self.active_thread_id else {
+            return;
+        };
+
+        let thread = match app_server
+            .thread_read(thread_id, /*include_turns*/ true)
+            .await
+        {
+            Ok(thread) => thread,
+            Err(err) => {
+                let message = format!("Failed to refresh specialist checkpoint: {err}");
+                tracing::warn!("{message}");
+                self.chat_widget.add_error_message(message);
+                return;
+            }
+        };
+
+        let checkpoint_result = {
+            let Some(specialist_session) = self.specialist_session.as_mut() else {
+                return;
+            };
+            let objective_fallback = specialist_session
+                .task_contract
+                .as_ref()
+                .map(|contract| contract.contract.objective.clone())
+                .unwrap_or_else(|| "Continue the specialist workspace.".to_string());
+            codex_specialist::write_checkpoint_for_turn(
+                &self.config.codex_home,
+                specialist_session,
+                &thread,
+                &notification.turn.id,
+                &objective_fallback,
+            )
+            .map(|_| specialist_session.clone())
+        };
+
+        match checkpoint_result {
+            Ok(updated_session) => {
+                self.chat_widget
+                    .set_specialist_session(Some(updated_session));
+            }
+            Err(err) => {
+                let message = format!("Failed to write specialist checkpoint: {err}");
+                tracing::warn!("{message}");
+                self.chat_widget.add_error_message(message);
+            }
+        }
     }
 
     async fn refresh_in_memory_config_from_disk_best_effort(&mut self, action: &str) {
@@ -3574,6 +3642,7 @@ impl App {
         active_profile: Option<String>,
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
+        specialist_session: Option<SpecialistSession>,
         session_selection: SessionSelection,
         feedback: codex_feedback::CodexFeedback,
         is_first_run: bool,
@@ -3678,6 +3747,7 @@ impl App {
                     status_account_display: status_account_display.clone(),
                     initial_plan_type,
                     model: Some(model.clone()),
+                    specialist_session: specialist_session.clone(),
                     startup_tooltip_override,
                     status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
                     terminal_title_invalid_items_warned: terminal_title_invalid_items_warned
@@ -3712,6 +3782,7 @@ impl App {
                     status_account_display: status_account_display.clone(),
                     initial_plan_type,
                     model: config.model.clone(),
+                    specialist_session: specialist_session.clone(),
                     startup_tooltip_override: None,
                     status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
                     terminal_title_invalid_items_warned: terminal_title_invalid_items_warned
@@ -3751,6 +3822,7 @@ impl App {
                     status_account_display: status_account_display.clone(),
                     initial_plan_type,
                     model: config.model.clone(),
+                    specialist_session: specialist_session.clone(),
                     startup_tooltip_override: None,
                     status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
                     terminal_title_invalid_items_warned: terminal_title_invalid_items_warned
@@ -3774,6 +3846,7 @@ impl App {
             app_event_tx,
             chat_widget,
             config,
+            specialist_session,
             active_profile,
             cli_kv_overrides,
             harness_overrides,
@@ -5729,8 +5802,19 @@ impl App {
             self.hydrate_collab_agent_metadata_for_notification(app_server, notification)
                 .await;
         }
+        let specialist_turn_completed =
+            match &event {
+                ThreadBufferedEvent::Notification(ServerNotification::TurnCompleted(
+                    notification,
+                )) if self.specialist_session.is_some() => Some(notification.clone()),
+                _ => None,
+            };
 
         self.handle_thread_event_now(event);
+        if let Some(notification) = specialist_turn_completed {
+            self.write_specialist_checkpoint_for_notification(app_server, &notification)
+                .await;
+        }
         if self.backtrack_render_pending {
             tui.frame_requester().schedule_frame();
         }
@@ -6320,6 +6404,7 @@ mod tests {
     use codex_protocol::request_permissions::RequestPermissionProfile;
     use codex_protocol::user_input::TextElement;
     use codex_protocol::user_input::UserInput;
+    use codex_specialist::load_specialist_session;
     use codex_utils_absolute_path::AbsolutePathBuf;
     use crossterm::event::KeyModifiers;
     use insta::assert_snapshot;
@@ -6594,6 +6679,7 @@ mod tests {
             status_account_display: None,
             initial_plan_type: None,
             model: Some(model),
+            specialist_session: None,
             startup_tooltip_override: None,
             status_line_invalid_items_warned: app.status_line_invalid_items_warned.clone(),
             terminal_title_invalid_items_warned: app.terminal_title_invalid_items_warned.clone(),
@@ -6653,6 +6739,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn enqueue_primary_thread_session_wraps_initial_prompt_for_specialist_sessions()
+    -> Result<()> {
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        let fixture = SpecialistFixture::new()?;
+        let specialist_session = load_specialist_session(&fixture.workspace_root, None, None, None)
+            .map_err(|err| color_eyre::eyre::eyre!("{err}"))?;
+        let thread_id = ThreadId::new();
+        let initial_prompt = "review the intake".to_string();
+        let config = app.config.clone();
+        let model = codex_core::test_support::get_model_offline(config.model.as_deref());
+        app.specialist_session = Some(specialist_session.clone());
+        app.chat_widget = ChatWidget::new_with_app_event(ChatWidgetInit {
+            config,
+            frame_requester: crate::tui::FrameRequester::test_dummy(),
+            app_event_tx: app.app_event_tx.clone(),
+            initial_user_message: create_initial_user_message(
+                Some(initial_prompt.clone()),
+                Vec::new(),
+                Vec::new(),
+            ),
+            enhanced_keys_supported: false,
+            has_chatgpt_account: false,
+            model_catalog: app.model_catalog.clone(),
+            feedback: codex_feedback::CodexFeedback::new(),
+            is_first_run: false,
+            status_account_display: None,
+            initial_plan_type: None,
+            model: Some(model),
+            specialist_session: Some(specialist_session),
+            startup_tooltip_override: None,
+            status_line_invalid_items_warned: app.status_line_invalid_items_warned.clone(),
+            terminal_title_invalid_items_warned: app.terminal_title_invalid_items_warned.clone(),
+            session_telemetry: app.session_telemetry.clone(),
+        });
+
+        app.enqueue_primary_thread_session(
+            test_thread_session(thread_id, PathBuf::from("/tmp/project")),
+            Vec::new(),
+        )
+        .await?;
+
+        let mut submitted_items = None;
+        while let Ok(event) = app_event_rx.try_recv() {
+            match event {
+                AppEvent::SubmitThreadOp {
+                    thread_id: op_thread_id,
+                    op: Op::UserTurn { items, .. },
+                } => {
+                    assert_eq!(op_thread_id, thread_id);
+                    submitted_items = Some(items);
+                }
+                AppEvent::CodexOp(Op::UserTurn { items, .. }) => {
+                    submitted_items = Some(items);
+                }
+                _ => {}
+            }
+        }
+
+        let Some(items) = submitted_items else {
+            panic!("expected specialist prompt submission");
+        };
+        let Some(UserInput::Text { text, .. }) = items.last() else {
+            panic!("expected injected text item");
+        };
+        assert!(text.contains("<specialist_workspace>"));
+        assert!(text.contains("case-file.md"));
+        assert!(text.contains(&initial_prompt));
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn reset_thread_event_state_aborts_listener_tasks() {
         struct NotifyOnDrop(Option<tokio::sync::oneshot::Sender<()>>);
 
@@ -6685,6 +6843,63 @@ mod tests {
             .await
             .expect("timed out waiting for listener task abort")
             .expect("listener task drop notification should succeed");
+    }
+
+    struct SpecialistFixture {
+        _tempdir: tempfile::TempDir,
+        workspace_root: PathBuf,
+    }
+
+    impl SpecialistFixture {
+        fn new() -> Result<Self> {
+            let tempdir = tempdir()?;
+            let source_root = tempdir.path().join("source");
+            let deliverables_root = tempdir.path().join("deliverables");
+            let workspace_root = tempdir.path().join("workspace");
+            std::fs::create_dir_all(&source_root)?;
+            std::fs::create_dir_all(&deliverables_root)?;
+            std::fs::create_dir_all(workspace_root.join(".codex"))?;
+            std::fs::write(source_root.join("case-file.md"), "source evidence")?;
+            std::fs::write(
+                workspace_root.join(".codex/workspace.toml"),
+                r#"
+workspace_id = "matter"
+issue_id = "issue-123"
+default_context_set = "core"
+
+[roles.source]
+root = "source_root"
+access = "read-only"
+
+[roles.analysis]
+root = "workspace_root"
+access = "read-write"
+
+[roles.deliverables]
+root = "deliverables_root"
+access = "read-write"
+
+[context_sets.core]
+files = [
+  { role = "source", path = "case-file.md" },
+]
+"#,
+            )?;
+            std::fs::write(
+                workspace_root.join(".codex/machine.local.toml"),
+                format!(
+                    "[roots]\nsource_root = \"{}\"\nworkspace_root = \"{}\"\ndeliverables_root = \"{}\"\n",
+                    source_root.display(),
+                    workspace_root.display(),
+                    deliverables_root.display(),
+                ),
+            )?;
+
+            Ok(Self {
+                _tempdir: tempdir,
+                workspace_root,
+            })
+        }
     }
 
     #[tokio::test]
@@ -9106,6 +9321,7 @@ guardian_approval = true
             app_event_tx,
             chat_widget,
             config,
+            specialist_session: None,
             active_profile: None,
             cli_kv_overrides: Vec::new(),
             harness_overrides: ConfigOverrides::default(),
@@ -9160,6 +9376,7 @@ guardian_approval = true
                 app_event_tx,
                 chat_widget,
                 config,
+                specialist_session: None,
                 active_profile: None,
                 cli_kv_overrides: Vec::new(),
                 harness_overrides: ConfigOverrides::default(),
@@ -10554,6 +10771,7 @@ guardian_approval = true
             status_account_display: app.chat_widget.status_account_display().cloned(),
             initial_plan_type: app.chat_widget.current_plan_type(),
             model: Some(app.chat_widget.current_model().to_string()),
+            specialist_session: app.specialist_session.clone(),
             startup_tooltip_override: None,
             status_line_invalid_items_warned: app.status_line_invalid_items_warned.clone(),
             terminal_title_invalid_items_warned: app.terminal_title_invalid_items_warned.clone(),

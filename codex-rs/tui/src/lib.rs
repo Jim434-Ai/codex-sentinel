@@ -48,6 +48,7 @@ use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::TurnContextItem;
 use codex_rollout::state_db::get_state_db;
+use codex_specialist::SpecialistSession;
 use codex_state::log_db;
 use codex_terminal_detection::terminal_info;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -129,6 +130,7 @@ mod model_catalog;
 mod model_migration;
 mod multi_agents;
 mod notifications;
+mod ollama_model_picker;
 pub(crate) mod onboarding;
 mod oss_selection;
 mod pager_overlay;
@@ -140,6 +142,7 @@ mod session_log;
 mod shimmer;
 mod skills_helpers;
 mod slash_command;
+mod specialist;
 mod status;
 mod status_indicator_widget;
 mod streaming;
@@ -617,6 +620,26 @@ fn latest_session_cwd_filter<'a>(
     }
 }
 
+fn apply_specialist_config_if_needed(
+    config: &mut Config,
+    specialist_session: Option<&SpecialistSession>,
+) -> anyhow::Result<()> {
+    if let Some(specialist_session) = specialist_session {
+        codex_specialist::apply_specialist_config(config, specialist_session)?;
+    }
+    Ok(())
+}
+
+fn refresh_specialist_runtime_state_if_needed(
+    specialist_session: Option<&mut SpecialistSession>,
+    codex_home: &std::path::Path,
+) -> anyhow::Result<()> {
+    if let Some(specialist_session) = specialist_session {
+        codex_specialist::refresh_specialist_runtime_state(specialist_session, codex_home)?;
+    }
+    Ok(())
+}
+
 pub async fn run_main(
     mut cli: Cli,
     arg0_paths: Arg0DispatchPaths,
@@ -635,6 +658,8 @@ pub async fn run_main(
             auth_token: remote_auth_token.clone(),
         })
         .unwrap_or(AppServerTarget::Embedded);
+    let mut specialist_session = specialist::prepare_specialist_cli(&mut cli, &app_server_target)
+        .map_err(std::io::Error::other)?;
     let remote_cwd_override = cli
         .cwd
         .clone()
@@ -792,12 +817,16 @@ pub async fn run_main(
         ..Default::default()
     };
 
-    let config = load_config_or_exit(
+    let mut config = load_config_or_exit(
         cli_kv_overrides.clone(),
         overrides.clone(),
         cloud_requirements.clone(),
     )
     .await;
+    refresh_specialist_runtime_state_if_needed(specialist_session.as_mut(), &config.codex_home)
+        .map_err(std::io::Error::other)?;
+    apply_specialist_config_if_needed(&mut config, specialist_session.as_ref())
+        .map_err(std::io::Error::other)?;
 
     #[allow(clippy::print_stderr)]
     match check_execpolicy_for_warnings(&config.config_layer_stack).await {
@@ -944,6 +973,7 @@ pub async fn run_main(
         loader_overrides,
         app_server_target,
         remote_cwd_override,
+        specialist_session,
         config,
         overrides,
         cli_kv_overrides,
@@ -963,6 +993,7 @@ async fn run_ratatui_app(
     loader_overrides: LoaderOverrides,
     app_server_target: AppServerTarget,
     remote_cwd_override: Option<PathBuf>,
+    mut specialist_session: Option<SpecialistSession>,
     initial_config: Config,
     overrides: ConfigOverrides,
     cli_kv_overrides: Vec<(String, toml::Value)>,
@@ -1050,7 +1081,7 @@ async fn run_ratatui_app(
     let should_show_onboarding =
         should_show_onboarding(login_status, &initial_config, should_show_trust_screen_flag);
 
-    let config = if should_show_onboarding {
+    let mut config = if should_show_onboarding {
         let show_login_screen = should_show_login_screen(login_status, &initial_config);
         let onboarding_result = run_onboarding_app(
             OnboardingScreenArgs {
@@ -1113,6 +1144,10 @@ async fn run_ratatui_app(
         shutdown_app_server_if_present(onboarding_app_server.take()).await;
         initial_config
     };
+    refresh_specialist_runtime_state_if_needed(specialist_session.as_mut(), &config.codex_home)
+        .map_err(std::io::Error::other)?;
+    apply_specialist_config_if_needed(&mut config, specialist_session.as_ref())
+        .map_err(std::io::Error::other)?;
     shutdown_app_server_if_present(onboarding_app_server.take()).await;
 
     let mut missing_session_exit = |id_str: &str, action: &str| {
@@ -1340,6 +1375,10 @@ async fn run_ratatui_app(
         }
         _ => config,
     };
+    refresh_specialist_runtime_state_if_needed(specialist_session.as_mut(), &config.codex_home)
+        .map_err(std::io::Error::other)?;
+    apply_specialist_config_if_needed(&mut config, specialist_session.as_ref())
+        .map_err(std::io::Error::other)?;
 
     // Configure syntax highlighting theme from the final config — onboarding
     // and resume/fork can both reload config with a different tui_theme, so
@@ -1395,6 +1434,7 @@ async fn run_ratatui_app(
         active_profile,
         prompt,
         images,
+        specialist_session,
         session_selection,
         feedback,
         should_show_trust_screen, // Proxy to: is it a first run in this directory?
