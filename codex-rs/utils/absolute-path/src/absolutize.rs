@@ -12,6 +12,10 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(super) fn absolutize(path: &Path) -> std::io::Result<PathBuf> {
+    if path.is_absolute() {
+        return Ok(normalize_path(path));
+    }
+
     Ok(absolutize_from(path, &std::env::current_dir()?))
 }
 
@@ -98,6 +102,15 @@ mod tests {
     fn absolute_path_dots_are_removed() {
         assert_eq!(
             absolutize_from(Path::new("/path/to/./123/../456"), Path::new("/base")),
+            PathBuf::from("/path/to/456")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn absolutize_absolute_path_dots_are_removed() {
+        assert_eq!(
+            absolutize(Path::new("/path/to/./123/../456")).expect("absolute path"),
             PathBuf::from("/path/to/456")
         );
     }
