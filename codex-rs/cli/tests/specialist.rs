@@ -245,6 +245,47 @@ fn specialist_worker_dry_run_speaks_jsonl_protocol() -> Result<(), Box<dyn std::
 }
 
 #[test]
+fn specialist_manager_dry_run_supervises_worker() -> Result<(), Box<dyn std::error::Error>> {
+    let codex_home = TempDir::new()?;
+    let tempdir = TempDir::new()?;
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    let workspace_root = tempdir.path().join("workspace");
+    fs::create_dir_all(source_root.join("corpus"))?;
+    fs::create_dir_all(analysis_root.join("notes"))?;
+    fs::write(source_root.join("corpus/case-file.md"), "source")?;
+    fs::write(analysis_root.join("notes/master.md"), "analysis")?;
+    write_specialist_workspace(&workspace_root, &source_root, &analysis_root)?;
+
+    let input = concat!(
+        "start\n",
+        "status\n",
+        "prompt Continue the review.\n",
+        "shutdown\n",
+        "quit\n",
+    );
+    let output = codex_command(&codex_home, &workspace_root)?
+        .args(["specialist", "manager", "--dry-run"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output)?;
+
+    assert!(stdout.contains("Codex specialist manager daemon started."));
+    assert!(stdout.contains("worker ready: workspace=matter issue=issue-123"));
+    assert!(stdout.contains("status status-1: no checkpoint found"));
+    assert!(stdout.contains("turn prompt-2 started"));
+    assert!(stdout.contains("turn prompt-2 completed: exit_code=0"));
+    assert!(stdout.contains("worker needs direction for prompt-2"));
+    assert!(stdout.contains("worker exited: shutdown command received"));
+
+    Ok(())
+}
+
+#[test]
 fn specialist_init_creates_workspace_scaffold() -> Result<(), Box<dyn std::error::Error>> {
     let codex_home = TempDir::new()?;
     let tempdir = TempDir::new()?;

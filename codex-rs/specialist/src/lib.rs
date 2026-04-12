@@ -40,4 +40,6 @@ pub use task_contract::load_task_contract;
 pub use worker_protocol::SpecialistWorkerCommand;
 pub use worker_protocol::SpecialistWorkerEvent;
 pub use worker_protocol::decode_worker_command;
+pub use worker_protocol::decode_worker_event;
+pub use worker_protocol::encode_worker_command;
 pub use worker_protocol::encode_worker_event;

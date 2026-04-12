@@ -50,6 +50,14 @@ pub fn decode_worker_command(line: &str) -> serde_json::Result<SpecialistWorkerC
     serde_json::from_str(line)
 }
 
+pub fn encode_worker_command(command: &SpecialistWorkerCommand) -> serde_json::Result<String> {
+    serde_json::to_string(command)
+}
+
+pub fn decode_worker_event(line: &str) -> serde_json::Result<SpecialistWorkerEvent> {
+    serde_json::from_str(line)
+}
+
 pub fn encode_worker_event(event: &SpecialistWorkerEvent) -> serde_json::Result<String> {
     serde_json::to_string(event)
 }
@@ -59,6 +67,8 @@ mod tests {
     use super::SpecialistWorkerCommand;
     use super::SpecialistWorkerEvent;
     use super::decode_worker_command;
+    use super::decode_worker_event;
+    use super::encode_worker_command;
     use super::encode_worker_event;
     use pretty_assertions::assert_eq;
 
@@ -76,10 +86,15 @@ mod tests {
                 prompt: "Continue the source hunt.".to_string(),
             }
         );
+
+        assert_eq!(
+            encode_worker_command(&command).expect("encode command"),
+            r#"{"type":"prompt","id":"turn-1","prompt":"Continue the source hunt."}"#
+        );
     }
 
     #[test]
-    fn ready_event_serializes_as_tagged_json() {
+    fn ready_event_round_trips_as_tagged_json() {
         let event = SpecialistWorkerEvent::Ready {
             workspace_id: "workspace".to_string(),
             issue_id: "issue".to_string(),
@@ -89,6 +104,13 @@ mod tests {
         assert_eq!(
             encode_worker_event(&event).expect("encode event"),
             r#"{"type":"ready","workspace_id":"workspace","issue_id":"issue","worker_pid":42}"#
+        );
+        assert_eq!(
+            decode_worker_event(
+                r#"{"type":"ready","workspace_id":"workspace","issue_id":"issue","worker_pid":42}"#
+            )
+            .expect("decode event"),
+            event
         );
     }
 }

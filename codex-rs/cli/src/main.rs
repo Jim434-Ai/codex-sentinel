@@ -41,6 +41,7 @@ mod desktop_app;
 mod mcp_cmd;
 mod specialist_cmd;
 mod specialist_init;
+mod specialist_manager;
 mod specialist_worker;
 #[cfg(not(windows))]
 mod wsl_paths;

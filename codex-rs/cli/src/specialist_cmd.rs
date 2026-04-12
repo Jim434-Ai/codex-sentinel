@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use crate::specialist_init::SpecialistInitArgs;
 use crate::specialist_init::run_specialist_init;
+use crate::specialist_manager::run_specialist_manager;
 use crate::specialist_worker::run_specialist_worker;
 
 #[derive(Debug, clap::Parser)]
@@ -33,6 +34,9 @@ pub enum SpecialistSubcommand {
 
     /// Read the latest specialist checkpoint for the workspace.
     Status(SpecialistStatusArgs),
+
+    /// Run a local manager daemon that supervises a specialist worker.
+    Manager(SpecialistManagerArgs),
 
     /// Run a JSONL specialist worker loop for manager-owned lifecycle control.
     Worker(SpecialistWorkerArgs),
@@ -97,6 +101,28 @@ pub struct SpecialistWorkerArgs {
     pub exec_bin: Option<PathBuf>,
 
     /// Accept commands and emit events without running model turns.
+    #[arg(long = "dry-run", default_value_t = false)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct SpecialistManagerArgs {
+    #[command(flatten)]
+    pub locator: SpecialistWorkspaceLocatorArgs,
+
+    /// Named context set to preload for specialist worker prompt turns.
+    #[arg(long = "context-set", value_name = "NAME")]
+    pub context_set: Option<String>,
+
+    /// Codex binary used by the specialist worker for prompt turns.
+    #[arg(long = "exec-bin", value_name = "FILE")]
+    pub exec_bin: Option<PathBuf>,
+
+    /// Start the specialist worker immediately instead of waiting for `start`.
+    #[arg(long = "autostart", default_value_t = false)]
+    pub autostart: bool,
+
+    /// Run the managed specialist worker in dry-run mode.
     #[arg(long = "dry-run", default_value_t = false)]
     pub dry_run: bool,
 }
@@ -186,6 +212,9 @@ pub fn run_specialist_command(command: SpecialistCli) -> anyhow::Result<()> {
                     println!("No checkpoint found.");
                 }
             }
+        }
+        SpecialistSubcommand::Manager(args) => {
+            run_specialist_manager(args)?;
         }
         SpecialistSubcommand::Worker(args) => {
             run_specialist_worker(args)?;
