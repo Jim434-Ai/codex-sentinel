@@ -188,6 +188,63 @@ fn specialist_status_reads_latest_checkpoint() -> Result<(), Box<dyn std::error:
 }
 
 #[test]
+fn specialist_worker_dry_run_speaks_jsonl_protocol() -> Result<(), Box<dyn std::error::Error>> {
+    let codex_home = TempDir::new()?;
+    let tempdir = TempDir::new()?;
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    let workspace_root = tempdir.path().join("workspace");
+    fs::create_dir_all(source_root.join("corpus"))?;
+    fs::create_dir_all(analysis_root.join("notes"))?;
+    fs::write(source_root.join("corpus/case-file.md"), "source")?;
+    fs::write(analysis_root.join("notes/master.md"), "analysis")?;
+    write_specialist_workspace(&workspace_root, &source_root, &analysis_root)?;
+
+    let input = concat!(
+        r#"{"type":"status","id":"status-1"}"#,
+        "\n",
+        r#"{"type":"prompt","id":"turn-1","prompt":"Continue the review."}"#,
+        "\n",
+        r#"{"type":"shutdown","id":"shutdown-1"}"#,
+        "\n",
+    );
+    let output = codex_command(&codex_home, &workspace_root)?
+        .args(["specialist", "worker", "--dry-run"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output)?;
+    let events = stdout
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event["type"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec![
+            "ready",
+            "status",
+            "turn_started",
+            "turn_completed",
+            "needs_direction",
+            "exited",
+        ]
+    );
+    assert_eq!(events[0]["workspace_id"], "matter");
+    assert_eq!(events[1]["command_id"], "status-1");
+    assert_eq!(events[3]["exit_code"], 0);
+    assert_eq!(events[5]["command_id"], "shutdown-1");
+
+    Ok(())
+}
+
+#[test]
 fn specialist_init_creates_workspace_scaffold() -> Result<(), Box<dyn std::error::Error>> {
     let codex_home = TempDir::new()?;
     let tempdir = TempDir::new()?;

@@ -1,7 +1,8 @@
 # Specialist Workspaces
 
-`Codex Sentinel v0.0.1` adds a thin specialist workflow layer on top of the
-existing CLI. The first cut now covers:
+`Codex Sentinel v0.0.2` added a thin specialist workflow layer on top of the
+existing CLI. `Codex Sentinel v0.0.3` starts the manager-owned lifecycle path.
+The current specialist workflow now covers:
 
 - workspace manifest resolution
 - machine-local root mapping
@@ -11,6 +12,7 @@ existing CLI. The first cut now covers:
 - specialist-aware interactive `codex` runs
 - specialist-aware `codex exec` runs
 - specialist checkpoint emission and resume state across interactive and exec runs
+- JSONL specialist worker protocol for manager-owned lifecycle control
 
 ## Files
 
@@ -122,6 +124,45 @@ Run the interactive TUI in specialist mode:
 codex --specialist
 codex --specialist --context-set core
 ```
+
+Run the JSONL specialist worker loop for manager-owned lifecycle control:
+
+```bash
+codex specialist worker
+codex specialist worker --context-set core
+codex specialist worker --dry-run
+```
+
+`codex specialist worker` is the first `Codex Sentinel v0.0.3` worker-mode
+slice. It is designed for a manager daemon or other local supervisor, not direct
+human prompting. The worker reads JSONL commands from stdin and writes JSONL
+events to stdout. Terminal multiplexers such as tmux can still observe logs or
+transcripts, but they should not be the lifecycle control plane.
+
+Supported worker commands:
+
+```jsonl
+{"type":"status","id":"status-1"}
+{"type":"prompt","id":"turn-1","prompt":"Continue the next bounded specialist task."}
+{"type":"shutdown","id":"shutdown-1"}
+```
+
+Representative worker events:
+
+```jsonl
+{"type":"ready","workspace_id":"matter","issue_id":"matter","worker_pid":12345}
+{"type":"status","command_id":"status-1","workspace_id":"matter","issue_id":"matter","checkpoint":null}
+{"type":"turn_started","command_id":"turn-1"}
+{"type":"turn_completed","command_id":"turn-1","exit_code":0,"final_message":"..."}
+{"type":"needs_direction","command_id":"turn-1","reason":"prompt turn completed; manager should inspect the latest checkpoint and decide the next action"}
+{"type":"exited","command_id":"shutdown-1","reason":"shutdown command received"}
+```
+
+Prompt commands currently run `codex exec --specialist --json` as a bounded
+child process and then emit `turn_completed` plus `needs_direction`. This is an
+MVP control surface for manager-daemon integration; later work should replace
+the child-process bridge with a direct worker runtime that streams structured
+turn events as they happen.
 
 When `--specialist` is enabled:
 

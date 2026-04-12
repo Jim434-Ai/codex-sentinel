@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use crate::specialist_init::SpecialistInitArgs;
 use crate::specialist_init::run_specialist_init;
+use crate::specialist_worker::run_specialist_worker;
 
 #[derive(Debug, clap::Parser)]
 pub struct SpecialistCli {
@@ -32,6 +33,9 @@ pub enum SpecialistSubcommand {
 
     /// Read the latest specialist checkpoint for the workspace.
     Status(SpecialistStatusArgs),
+
+    /// Run a JSONL specialist worker loop for manager-owned lifecycle control.
+    Worker(SpecialistWorkerArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -77,6 +81,24 @@ pub struct SpecialistStatusArgs {
     /// Print the latest checkpoint state as JSON.
     #[arg(long = "json", default_value_t = false)]
     json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SpecialistWorkerArgs {
+    #[command(flatten)]
+    pub locator: SpecialistWorkspaceLocatorArgs,
+
+    /// Named context set to preload for prompt turns.
+    #[arg(long = "context-set", value_name = "NAME")]
+    pub context_set: Option<String>,
+
+    /// Codex binary used for prompt turns. Defaults to the current executable.
+    #[arg(long = "exec-bin", value_name = "FILE")]
+    pub exec_bin: Option<PathBuf>,
+
+    /// Accept commands and emit events without running model turns.
+    #[arg(long = "dry-run", default_value_t = false)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -164,6 +186,9 @@ pub fn run_specialist_command(command: SpecialistCli) -> anyhow::Result<()> {
                     println!("No checkpoint found.");
                 }
             }
+        }
+        SpecialistSubcommand::Worker(args) => {
+            run_specialist_worker(args)?;
         }
     }
 

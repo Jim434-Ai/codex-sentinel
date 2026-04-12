@@ -2,6 +2,7 @@ mod checkpoint;
 mod manifest;
 mod runtime;
 mod task_contract;
+mod worker_protocol;
 
 pub use checkpoint::CheckpointPaths;
 pub use checkpoint::SpecialistCheckpoint;
@@ -36,3 +37,7 @@ pub use task_contract::DEFAULT_TASK_CONTRACT_RELATIVE_PATH;
 pub use task_contract::ResolvedTaskContract;
 pub use task_contract::TaskContract;
 pub use task_contract::load_task_contract;
+pub use worker_protocol::SpecialistWorkerCommand;
+pub use worker_protocol::SpecialistWorkerEvent;
+pub use worker_protocol::decode_worker_command;
+pub use worker_protocol::encode_worker_event;
