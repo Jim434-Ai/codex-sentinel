@@ -33,11 +33,10 @@ impl ManagerRuntime {
                     .and_then(|tmux| tmux.socket.clone())
             })
             .unwrap_or_else(|| DEFAULT_MANAGER_TMUX_SOCKET.to_string());
-        let current_dir = std::env::current_dir().context("resolve current directory")?;
         let specialist_codex_bin = if let Some(path) = specialist_codex_bin {
-            resolve_user_path(&current_dir, &path)
+            resolve_current_dir_path(path)?
         } else if let Some(path) = std::env::var_os("SPECIALIST_CODEX_BIN").map(PathBuf::from) {
-            resolve_user_path(&current_dir, &path)
+            resolve_current_dir_path(path)?
         } else if let Some(path) = workspace
             .config
             .paths
@@ -382,6 +381,15 @@ impl ManagerRuntime {
         let mut command = Command::new("tmux");
         command.arg("-L").arg(&self.tmux_socket);
         command
+    }
+}
+
+fn resolve_current_dir_path(path: PathBuf) -> anyhow::Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        let current_dir = std::env::current_dir().context("resolve current directory")?;
+        Ok(resolve_user_path(&current_dir, &path))
     }
 }
 

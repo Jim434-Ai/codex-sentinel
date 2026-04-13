@@ -95,3 +95,36 @@ fn manager_list_and_pings_use_manager_workspace() -> Result<(), Box<dyn std::err
 
     Ok(())
 }
+
+#[test]
+fn manager_absolute_paths_do_not_require_current_dir() -> Result<(), Box<dyn std::error::Error>> {
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    let removed_cwd = tempdir.path().join("removed-cwd");
+    fs::create_dir(&removed_cwd)?;
+    write_manager_workspace(&manager_root, &specialist_root)?;
+
+    let codex_bin = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let output = std::process::Command::new("/bin/sh")
+        .current_dir(&removed_cwd)
+        .env("CODEX_BIN", &codex_bin)
+        .env("MANAGER_ROOT", &manager_root)
+        .arg("-c")
+        .arg(
+            "rmdir \"$PWD\" && exec \"$CODEX_BIN\" manager --manager-workspace \"$MANAGER_ROOT\" --specialist-codex-bin \"$CODEX_BIN\" validate",
+        )
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("Manager workspace:"));
+    assert!(stdout.contains("Agents: 1"));
+
+    Ok(())
+}

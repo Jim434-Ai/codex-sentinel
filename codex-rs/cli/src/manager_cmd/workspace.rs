@@ -18,10 +18,16 @@ pub(crate) struct ManagerWorkspace {
 
 impl ManagerWorkspace {
     pub(crate) fn load(explicit_root: Option<&Path>) -> anyhow::Result<Self> {
-        let cwd = std::env::current_dir().context("resolve current directory")?;
         let root = match explicit_root {
-            Some(path) => resolve_user_path(&cwd, path),
-            None => discover_manager_workspace(&cwd)?,
+            Some(path) if path.is_absolute() => path.to_path_buf(),
+            Some(path) => {
+                let cwd = std::env::current_dir().context("resolve current directory")?;
+                resolve_user_path(&cwd, path)
+            }
+            None => {
+                let cwd = std::env::current_dir().context("resolve current directory")?;
+                discover_manager_workspace(&cwd)?
+            }
         };
         let registry_path = root.join(DEFAULT_AGENT_REGISTRY);
         let registry = fs::read_to_string(&registry_path)
