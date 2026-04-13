@@ -12,9 +12,9 @@ use std::process::Command;
 const DEFAULT_MANAGER_TMUX_SOCKET: &str = "codex-clean";
 
 pub(crate) struct ManagerRuntime {
-    workspace: ManagerWorkspace,
-    tmux_socket: String,
-    specialist_codex_bin: PathBuf,
+    pub(crate) workspace: ManagerWorkspace,
+    pub(crate) tmux_socket: String,
+    pub(crate) specialist_codex_bin: PathBuf,
 }
 
 impl ManagerRuntime {
@@ -244,7 +244,7 @@ impl ManagerRuntime {
         Ok(())
     }
 
-    fn start_agent_by_ref<W: Write>(
+    pub(crate) fn start_agent_by_ref<W: Write>(
         &self,
         agent: &ManagerAgent,
         writer: &mut W,
@@ -302,14 +302,14 @@ impl ManagerRuntime {
         Ok(())
     }
 
-    fn capture(&self, agent_id: &str, lines: usize) -> anyhow::Result<String> {
+    pub(crate) fn capture(&self, agent_id: &str, lines: usize) -> anyhow::Result<String> {
         let agent = self.workspace.agent(agent_id)?;
         let target = self.tmux_target_for(&agent.session)?;
         let start_line = format!("-{lines}");
         self.tmux_output(["capture-pane", "-pt", &target, "-S", &start_line])
     }
 
-    fn tmux_target_for(&self, session_name: &str) -> anyhow::Result<String> {
+    pub(crate) fn tmux_target_for(&self, session_name: &str) -> anyhow::Result<String> {
         let output = self.tmux_output(["list-sessions", "-F", "#{session_name}\t#{session_id}"])?;
         for line in output.lines() {
             if let Some((name, session_id)) = line.split_once('\t')
@@ -332,7 +332,7 @@ impl ManagerRuntime {
         Ok(status.success())
     }
 
-    fn pings(&self) -> anyhow::Result<Vec<PathBuf>> {
+    pub(crate) fn pings(&self) -> anyhow::Result<Vec<PathBuf>> {
         let ping_dir = self.workspace.root.join("pings");
         if !ping_dir.is_dir() {
             return Ok(Vec::new());
@@ -352,7 +352,7 @@ impl ManagerRuntime {
         Ok(pings)
     }
 
-    fn log_event(&self, message: String) -> anyhow::Result<()> {
+    pub(crate) fn log_event(&self, message: String) -> anyhow::Result<()> {
         let path = self.workspace.root.join("events.log.md");
         let stamp = current_timestamp();
         let mut file = fs::OpenOptions::new()
@@ -377,7 +377,7 @@ impl ManagerRuntime {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
-    fn tmux_command(&self) -> Command {
+    pub(crate) fn tmux_command(&self) -> Command {
         let mut command = Command::new("tmux");
         command.arg("-L").arg(&self.tmux_socket);
         command
@@ -404,7 +404,7 @@ fn print_status_hint<W: Write>(writer: &mut W, output: &str) -> anyhow::Result<(
     Ok(())
 }
 
-fn status_hint(output: &str) -> &'static str {
+pub(crate) fn status_hint(output: &str) -> &'static str {
     let lower = output.to_ascii_lowercase();
     if lower.contains("the application panicked")
         || lower.contains("panicked at")
@@ -430,7 +430,7 @@ fn status_hint(output: &str) -> &'static str {
     }
 }
 
-fn last_lines(text: &str, limit: usize) -> Vec<&str> {
+pub(crate) fn last_lines(text: &str, limit: usize) -> Vec<&str> {
     let lines = text.lines().collect::<Vec<_>>();
     let start = lines.len().saturating_sub(limit);
     lines[start..].to_vec()
@@ -441,7 +441,7 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn stderr_text(output: &std::process::Output) -> String {
+pub(crate) fn stderr_text(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stderr.is_empty() {
         format!("process exited with status {}", output.status)
@@ -450,7 +450,7 @@ fn stderr_text(output: &std::process::Output) -> String {
     }
 }
 
-fn current_timestamp() -> String {
+pub(crate) fn current_timestamp() -> String {
     let output = Command::new("date")
         .arg("+%Y-%m-%d %H:%M %Z")
         .output()

@@ -31,6 +31,21 @@ Use from the manager workspace:
 codex manager validate
 codex manager start-active
 codex manager cycle --lines 80
+codex manager watch --interval-seconds 30
+codex manager daemon --restart-missing
+```
+
+Use direct prompt delivery for tmux-backed specialists:
+
+```bash
+codex manager prompt agent-003 --delivery auto Continue the review.
+```
+
+Use the structured worker protocol path for one-shot status or prompt turns:
+
+```bash
+codex manager worker-status agent-003
+codex manager worker-prompt agent-003 Continue the review.
 ```
 
 This bootstrap is intentionally separate from `docs/specialist-bootstrap/` so

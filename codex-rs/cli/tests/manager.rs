@@ -8,6 +8,15 @@ fn codex_command(cwd: &std::path::Path) -> Result<Command, Box<dyn std::error::E
     Ok(command)
 }
 
+fn codex_command_with_home(
+    codex_home: &TempDir,
+    cwd: &std::path::Path,
+) -> Result<Command, Box<dyn std::error::Error>> {
+    let mut command = codex_command(cwd)?;
+    command.env("CODEX_HOME", codex_home.path());
+    Ok(command)
+}
+
 fn write_manager_workspace(
     manager_root: &std::path::Path,
     specialist_root: &std::path::Path,
@@ -36,6 +45,51 @@ fn write_manager_workspace(
     Ok(())
 }
 
+fn write_specialist_workspace(
+    workspace_root: &std::path::Path,
+    source_root: &std::path::Path,
+    analysis_root: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir_all(source_root.join("corpus"))?;
+    fs::create_dir_all(analysis_root.join("notes"))?;
+    fs::write(source_root.join("corpus/case-file.md"), "source")?;
+    fs::write(analysis_root.join("notes/master.md"), "analysis")?;
+    fs::create_dir_all(workspace_root.join(".codex"))?;
+    fs::write(
+        workspace_root.join(".codex/workspace.toml"),
+        r#"
+workspace_id = "matter"
+issue_id = "issue-123"
+default_context_set = "core"
+
+[roles.source]
+root = "source_root"
+path = "corpus"
+access = "read-only"
+
+[roles.analysis]
+root = "analysis_root"
+path = "notes"
+access = "read-write"
+
+[context_sets.core]
+files = [
+  { role = "analysis", path = "master.md" },
+  { role = "source", path = "case-file.md" },
+]
+"#,
+    )?;
+    fs::write(
+        workspace_root.join(".codex/machine.local.toml"),
+        format!(
+            "[roots]\nsource_root = \"{}\"\nanalysis_root = \"{}\"\n",
+            source_root.display(),
+            analysis_root.display()
+        ),
+    )?;
+    Ok(())
+}
+
 #[test]
 fn manager_validate_loads_portable_workspace() -> Result<(), Box<dyn std::error::Error>> {
     let tempdir = TempDir::new()?;
@@ -56,6 +110,79 @@ fn manager_validate_loads_portable_workspace() -> Result<(), Box<dyn std::error:
     assert!(stdout.contains("Agents: 1"));
     assert!(stdout.contains("Active agents: 1"));
     assert!(stdout.contains("tmux socket: test-socket"));
+
+    Ok(())
+}
+
+#[test]
+fn manager_worker_status_uses_specialist_worker_protocol() -> Result<(), Box<dyn std::error::Error>>
+{
+    let codex_home = TempDir::new()?;
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
+
+    let codex_bin = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let output = codex_command_with_home(&codex_home, &manager_root)?
+        .args([
+            "manager",
+            "--specialist-codex-bin",
+            codex_bin.to_str().expect("utf8 temp path"),
+            "worker-status",
+            "agent-003",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output)?;
+    assert!(stdout.contains("worker ready workspace_id=matter issue_id=issue-123"));
+    assert!(stdout.contains("checkpoint=none"));
+    assert!(stdout.contains("worker exited command_id="));
+
+    Ok(())
+}
+
+#[test]
+fn manager_worker_prompt_dry_run_uses_specialist_worker_protocol()
+-> Result<(), Box<dyn std::error::Error>> {
+    let codex_home = TempDir::new()?;
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
+
+    let codex_bin = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let output = codex_command_with_home(&codex_home, &manager_root)?
+        .args([
+            "manager",
+            "--specialist-codex-bin",
+            codex_bin.to_str().expect("utf8 temp path"),
+            "worker-prompt",
+            "--dry-run",
+            "agent-003",
+            "Continue",
+            "the",
+            "review.",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output)?;
+    assert!(stdout.contains("worker turn started command_id="));
+    assert!(stdout.contains("worker turn completed command_id="));
+    assert!(stdout.contains("final_message=dry-run prompt accepted"));
+    assert!(stdout.contains("worker needs direction command_id="));
 
     Ok(())
 }

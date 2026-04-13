@@ -3,16 +3,16 @@
 `codex manager` is the portable control surface for supervising multiple Codex
 specialist agents from a manager workspace.
 
-The first implementation intentionally preserves the existing pilot operating
-model:
+The manager command surface intentionally preserves the existing pilot
+operating model while adding a foreground supervisor loop:
 
 - a manager workspace owns the registry and authority documents;
 - specialists are listed in `agents.tsv`;
 - tmux remains the compatibility and observer layer;
-- manager commands are deterministic lifecycle/status tools, not a replacement
-  for the model-backed manager agent loop;
-- `codex specialist worker` remains the lower-level specialist process protocol
-  for later event-driven control.
+- `watch` and `daemon` provide deterministic foreground supervision, not a
+  model-backed manager agent loop;
+- `worker-status` and `worker-prompt` provide the lower-level structured
+  specialist protocol path for later event-driven control.
 
 ## Files
 
@@ -57,8 +57,30 @@ codex manager start agent-003
 codex manager start-active
 codex manager check agent-003 --lines 120
 codex manager cycle --lines 80
+codex manager watch --interval-seconds 30
+codex manager daemon --restart-missing
 codex manager stop agent-003
 codex manager restart agent-003
+```
+
+Prompt a tmux-backed specialist without taking over the whole terminal:
+
+```bash
+codex manager prompt agent-003 --delivery auto Continue the source review.
+codex manager prompt agent-003 --delivery stage Draft this into the composer but do not interrupt.
+codex manager prompt agent-003 --delivery submit Continue now.
+```
+
+`auto` submits when the specialist looks idle at the prompt and stages the text
+without pressing Enter when the specialist looks busy.
+
+Use the worker-backed path when you want a structured one-shot protocol instead
+of a live TUI pane:
+
+```bash
+codex manager worker-status agent-003
+codex manager worker-prompt agent-003 Continue the source review.
+codex manager worker-prompt --dry-run agent-003 Test the worker protocol only.
 ```
 
 Run from inside a manager workspace, or pass an explicit workspace:

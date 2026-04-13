@@ -1,8 +1,11 @@
 mod runtime;
+mod supervisor;
+mod worker_backend;
 mod workspace;
 
 use clap::Args;
 use clap::Subcommand;
+use clap::ValueEnum;
 use runtime::ManagerRuntime;
 use std::path::PathBuf;
 use workspace::ManagerWorkspace;
@@ -59,6 +62,21 @@ enum ManagerSubcommand {
 
     /// Check pings and every active registered agent.
     Cycle(ManagerCycleArgs),
+
+    /// Watch active specialists and report status changes.
+    Watch(ManagerWatchArgs),
+
+    /// Paste a prompt into a managed specialist tmux session.
+    Prompt(ManagerPromptArgs),
+
+    /// Run a foreground manager daemon loop.
+    Daemon(ManagerDaemonArgs),
+
+    /// Ask one specialist via the structured worker protocol for status.
+    WorkerStatus(ManagerWorkerStatusArgs),
+
+    /// Send one prompt turn through the structured specialist worker protocol.
+    WorkerPrompt(ManagerWorkerPromptArgs),
 }
 
 #[derive(Debug, Args)]
@@ -80,6 +98,106 @@ struct ManagerCaptureArgs {
 struct ManagerCycleArgs {
     #[arg(long = "lines", default_value_t = 80)]
     lines: usize,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ManagerWatchArgs {
+    #[arg(long = "lines", default_value_t = 80)]
+    lines: usize,
+
+    #[arg(long = "interval-seconds", default_value_t = 30)]
+    interval_seconds: u64,
+
+    #[arg(long = "iterations", value_name = "COUNT")]
+    iterations: Option<u32>,
+
+    #[arg(long = "start-active", default_value_t = false)]
+    start_active: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManagerPromptArgs {
+    #[arg(value_name = "AGENT_ID")]
+    agent_id: String,
+
+    #[arg(
+        value_name = "PROMPT",
+        required = true,
+        num_args = 1..,
+        trailing_var_arg = true
+    )]
+    prompt: Vec<String>,
+
+    #[arg(long = "delivery", value_enum, default_value_t = ManagerPromptDelivery::Auto)]
+    delivery: ManagerPromptDelivery,
+
+    #[arg(long = "lines", default_value_t = 120)]
+    lines: usize,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ManagerDaemonArgs {
+    #[arg(long = "lines", default_value_t = 80)]
+    lines: usize,
+
+    #[arg(long = "interval-seconds", default_value_t = 30)]
+    interval_seconds: u64,
+
+    #[arg(long = "iterations", value_name = "COUNT")]
+    iterations: Option<u32>,
+
+    #[arg(long = "no-start-active", default_value_t = false)]
+    no_start_active: bool,
+
+    #[arg(long = "restart-missing", default_value_t = false)]
+    restart_missing: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManagerWorkerStatusArgs {
+    #[arg(value_name = "AGENT_ID")]
+    agent_id: String,
+
+    #[arg(long = "context-set", value_name = "NAME")]
+    context_set: Option<String>,
+
+    #[arg(long = "json", default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManagerWorkerPromptArgs {
+    #[arg(value_name = "AGENT_ID")]
+    agent_id: String,
+
+    #[arg(
+        value_name = "PROMPT",
+        required = true,
+        num_args = 1..,
+        trailing_var_arg = true
+    )]
+    prompt: Vec<String>,
+
+    #[arg(long = "context-set", value_name = "NAME")]
+    context_set: Option<String>,
+
+    #[arg(long = "dry-run", default_value_t = false)]
+    dry_run: bool,
+
+    #[arg(long = "json", default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum ManagerPromptDelivery {
+    /// Submit if the specialist is waiting; otherwise stage the prompt text.
+    Auto,
+
+    /// Paste text without pressing Enter.
+    Stage,
+
+    /// Paste text and press Enter.
+    Submit,
 }
 
 impl ManagerCli {
@@ -106,6 +224,35 @@ impl ManagerCli {
             }
             ManagerSubcommand::Pings => runtime.list_pings(&mut stdout)?,
             ManagerSubcommand::Cycle(args) => runtime.cycle(args.lines, &mut stdout)?,
+            ManagerSubcommand::Watch(args) => runtime.watch(&args, &mut stdout)?,
+            ManagerSubcommand::Prompt(args) => {
+                runtime.prompt_agent(
+                    &args.agent_id,
+                    &args.prompt.join(" "),
+                    args.delivery,
+                    args.lines,
+                    &mut stdout,
+                )?;
+            }
+            ManagerSubcommand::Daemon(args) => runtime.daemon(&args, &mut stdout)?,
+            ManagerSubcommand::WorkerStatus(args) => {
+                runtime.worker_status(
+                    &args.agent_id,
+                    args.context_set.as_deref(),
+                    args.json,
+                    &mut stdout,
+                )?;
+            }
+            ManagerSubcommand::WorkerPrompt(args) => {
+                runtime.worker_prompt(
+                    &args.agent_id,
+                    &args.prompt.join(" "),
+                    args.context_set.as_deref(),
+                    args.dry_run,
+                    args.json,
+                    &mut stdout,
+                )?;
+            }
         }
 
         Ok(())
