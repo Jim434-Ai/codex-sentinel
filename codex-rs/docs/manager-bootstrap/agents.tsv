@@ -1,0 +1,2 @@
+agent_id	matter_id	name	workspace	session	role	status	current_objective
+agent-001	example-matter	Example Specialist	/absolute/path/to/specialist-workspace	agent-001	document-grounded specialist	paused	Replace this row with a real specialist objective

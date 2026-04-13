@@ -38,14 +38,15 @@ use supports_color::Stream;
 mod app_cmd;
 #[cfg(target_os = "macos")]
 mod desktop_app;
+mod manager_cmd;
 mod mcp_cmd;
 mod specialist_cmd;
 mod specialist_init;
-mod specialist_manager;
 mod specialist_worker;
 #[cfg(not(windows))]
 mod wsl_paths;
 
+use crate::manager_cmd::ManagerCli;
 use crate::mcp_cmd::McpCli;
 use crate::specialist_cmd::SpecialistCli;
 use crate::specialist_cmd::run_specialist_command;
@@ -146,6 +147,9 @@ enum Subcommand {
 
     /// Specialist workflow helpers for durable workspace/context state.
     Specialist(SpecialistCli),
+
+    /// Manager workflow helpers for supervising multiple Codex agents.
+    Manager(ManagerCli),
 
     /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
@@ -818,6 +822,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 "specialist",
             )?;
             run_specialist_command(specialist_cli)?;
+        }
+        Some(Subcommand::Manager(manager_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "manager",
+            )?;
+            manager_cli.run()?;
         }
         Some(Subcommand::Login(mut login_cli)) => {
             reject_remote_mode_for_subcommand(

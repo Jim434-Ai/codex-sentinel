@@ -1,0 +1,7 @@
+[tmux]
+socket = "codex-clean"
+
+[paths]
+# Leave unset to use the current codex executable. Set this when the manager
+# should launch a specific specialist fork binary.
+# specialist_codex_bin = "/absolute/path/to/codex"

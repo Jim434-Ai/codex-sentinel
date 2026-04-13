@@ -133,30 +133,6 @@ codex specialist worker --context-set core
 codex specialist worker --dry-run
 ```
 
-Run the local manager daemon that owns a specialist worker process:
-
-```bash
-codex specialist manager
-codex specialist manager --dry-run
-codex specialist manager --autostart
-```
-
-The manager daemon is a terminal command loop for the first local lifecycle
-MVP. It starts a managed worker, sends prompt/status/shutdown commands over the
-JSONL worker protocol, and reports the worker's events back to the terminal.
-It is not yet an autonomous LLM manager; use it to keep the worker process under
-one local supervisor while you decide each next prompt.
-
-Manager commands:
-
-```text
-start
-status
-prompt Continue the next bounded specialist task.
-shutdown
-quit
-```
-
 `codex specialist worker` is the first `Codex Sentinel v0.0.3` worker-mode
 slice. It is designed for a manager daemon or other local supervisor, not direct
 human prompting. The worker reads JSONL commands from stdin and writes JSONL
