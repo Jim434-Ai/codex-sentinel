@@ -27,6 +27,8 @@ pub(super) struct WorkerProcess {
     pub(super) child: Child,
     stdin: ChildStdin,
     pub(super) busy: bool,
+    pub(super) last_event: Instant,
+    pub(super) last_status_request: Option<Instant>,
     sequence: u64,
 }
 
@@ -93,6 +95,8 @@ impl WorkerProcess {
             child,
             stdin,
             busy: false,
+            last_event: Instant::now(),
+            last_status_request: None,
             sequence: 0,
         })
     }
@@ -111,6 +115,10 @@ impl WorkerProcess {
         self.stdin
             .flush()
             .context("flush specialist worker command")
+    }
+
+    pub(super) fn mark_event(&mut self) {
+        self.last_event = Instant::now();
     }
 }
 
@@ -226,7 +234,7 @@ pub(super) fn write_worker_pool_event<W: Write>(
         SpecialistWorkerEvent::NeedsDirection { command_id, reason } => {
             writeln!(
                 writer,
-                "worker needs direction agent_id={agent_id} command_id={command_id} reason={reason}"
+                "manager attention needed agent_id={agent_id} command_id={command_id} reason={reason}"
             )?;
         }
         SpecialistWorkerEvent::Error {

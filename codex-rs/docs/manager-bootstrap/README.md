@@ -50,5 +50,9 @@ codex manager worker-daemon --interval-seconds 30
 codex manager worker-enqueue agent-003 Continue the review.
 ```
 
+`worker-daemon` is event-first. It requests status at startup and then only
+sends heartbeat status check-ins after the worker has been quiet; the default
+heartbeat is 15 minutes.
+
 This bootstrap is intentionally separate from `docs/specialist-bootstrap/` so
 manager and specialist templates can evolve independently.

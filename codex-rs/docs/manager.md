@@ -92,10 +92,14 @@ codex manager worker-daemon --dry-run --iterations 1
 ```
 
 `worker-daemon` starts one `codex specialist worker` child per active agent,
-polls status, restarts exited workers by default, and watches
-`worker-prompts/<agent-id>/*.md` for queued prompts. `worker-enqueue` writes
-those prompt files so a second terminal can feed a running worker daemon without
-attaching to its process.
+requests status once at startup, restarts exited workers by default, and watches
+`worker-prompts/<agent-id>/*.md` for queued prompts. It is event-first: worker
+events drive terminal output, and status check-ins are only sent after a quiet
+heartbeat window. The default heartbeat is 900 seconds and can be changed with
+`--heartbeat-seconds`.
+
+`worker-enqueue` writes prompt files so a second terminal can feed a running
+worker daemon without attaching to its process.
 
 Run from inside a manager workspace, or pass an explicit workspace:
 

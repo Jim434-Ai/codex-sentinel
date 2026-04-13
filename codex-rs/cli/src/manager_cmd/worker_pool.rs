@@ -23,7 +23,6 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -74,7 +73,11 @@ impl ManagerRuntime {
                 &sender,
                 writer,
             )?;
-            self.send_status_requests(&mut workers, writer)?;
+            self.send_due_status_requests(
+                &mut workers,
+                Duration::from_secs(args.heartbeat_seconds),
+                writer,
+            )?;
             if let Some(prompt_queue_dir) = prompt_queue_dir.as_ref() {
                 self.dispatch_prompt_queue(prompt_queue_dir, &mut workers, writer)?;
             }
@@ -91,7 +94,12 @@ impl ManagerRuntime {
             {
                 break;
             }
-            thread::sleep(Duration::from_secs(args.interval_seconds));
+            self.drain_worker_messages(
+                &receiver,
+                &mut workers,
+                Duration::from_secs(args.interval_seconds),
+                writer,
+            )?;
         }
 
         self.shutdown_worker_pool(workers, &receiver, writer)
@@ -189,27 +197,26 @@ impl ManagerRuntime {
         Ok(workers)
     }
 
-    fn send_status_requests<W: Write>(
+    fn send_due_status_requests<W: Write>(
         &self,
         workers: &mut BTreeMap<String, WorkerProcess>,
+        heartbeat_interval: Duration,
         writer: &mut W,
     ) -> anyhow::Result<()> {
         for worker in workers.values_mut() {
-            if worker.busy {
-                writeln!(
-                    writer,
-                    "worker busy agent_id={} status_request=skipped",
-                    worker.agent.agent_id
-                )?;
+            if !worker_status_is_due(worker, heartbeat_interval) {
                 continue;
             }
             let id = worker.next_command_id("status");
             match worker.send(SpecialistWorkerCommand::Status { id }) {
-                Ok(()) => writeln!(
-                    writer,
-                    "worker status requested agent_id={}",
-                    worker.agent.agent_id
-                )?,
+                Ok(()) => {
+                    worker.last_status_request = Some(Instant::now());
+                    writeln!(
+                        writer,
+                        "worker status requested agent_id={}",
+                        worker.agent.agent_id
+                    )?;
+                }
                 Err(err) => writeln!(
                     writer,
                     "worker status request failed agent_id={}: {err:#}",
@@ -340,6 +347,7 @@ impl ManagerRuntime {
         match message {
             WorkerPoolMessage::Event { agent_id, event } => {
                 if let Some(worker) = workers.get_mut(&agent_id) {
+                    worker.mark_event();
                     match &event {
                         SpecialistWorkerEvent::TurnStarted { .. } => worker.busy = true,
                         SpecialistWorkerEvent::TurnCompleted { .. }
@@ -402,4 +410,16 @@ impl ManagerRuntime {
             .map(|path| resolve_user_path(&self.workspace.root, path))
             .unwrap_or_else(|| self.workspace.root.join(DEFAULT_PROMPT_QUEUE_DIR))
     }
+}
+
+fn worker_status_is_due(worker: &WorkerProcess, heartbeat_interval: Duration) -> bool {
+    if worker.busy {
+        return false;
+    }
+
+    let Some(last_status_request) = worker.last_status_request else {
+        return true;
+    };
+    let last_seen = last_status_request.max(worker.last_event);
+    Instant::now().duration_since(last_seen) >= heartbeat_interval
 }

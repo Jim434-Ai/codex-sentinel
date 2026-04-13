@@ -202,6 +202,9 @@ pub(crate) struct ManagerWorkerDaemonArgs {
     #[arg(long = "interval-seconds", default_value_t = 30)]
     interval_seconds: u64,
 
+    #[arg(long = "heartbeat-seconds", default_value_t = 900)]
+    heartbeat_seconds: u64,
+
     #[arg(long = "iterations", value_name = "COUNT")]
     iterations: Option<u32>,
 
