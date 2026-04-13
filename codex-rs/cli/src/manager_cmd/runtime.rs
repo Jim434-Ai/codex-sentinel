@@ -272,7 +272,7 @@ impl ManagerRuntime {
         }
 
         let run_cmd = format!(
-            "env -u CODEX_CI -u CODEX_SANDBOX_NETWORK_DISABLED -u CODEX_THREAD_ID {} resume --last --specialist --no-alt-screen",
+            "env -u CODEX_CI -u CODEX_SANDBOX_NETWORK_DISABLED -u CODEX_THREAD_ID {} resume --last --specialist --full-auto --no-alt-screen",
             shell_quote(&self.specialist_codex_bin)
         );
         let output = self
