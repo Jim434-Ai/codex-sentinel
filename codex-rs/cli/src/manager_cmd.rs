@@ -1,6 +1,9 @@
 mod runtime;
 mod supervisor;
 mod worker_backend;
+mod worker_pool;
+mod worker_pool_process;
+mod worker_pool_queue;
 mod workspace;
 
 use clap::Args;
@@ -77,6 +80,12 @@ enum ManagerSubcommand {
 
     /// Send one prompt turn through the structured specialist worker protocol.
     WorkerPrompt(ManagerWorkerPromptArgs),
+
+    /// Run active specialists as a persistent structured worker pool.
+    WorkerDaemon(ManagerWorkerDaemonArgs),
+
+    /// Queue a prompt file for a running worker-daemon.
+    WorkerEnqueue(ManagerWorkerEnqueueArgs),
 }
 
 #[derive(Debug, Args)]
@@ -188,6 +197,47 @@ struct ManagerWorkerPromptArgs {
     json: bool,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct ManagerWorkerDaemonArgs {
+    #[arg(long = "interval-seconds", default_value_t = 30)]
+    interval_seconds: u64,
+
+    #[arg(long = "iterations", value_name = "COUNT")]
+    iterations: Option<u32>,
+
+    #[arg(long = "context-set", value_name = "NAME")]
+    context_set: Option<String>,
+
+    #[arg(long = "dry-run", default_value_t = false)]
+    dry_run: bool,
+
+    #[arg(long = "prompt-queue-dir", value_name = "DIR")]
+    prompt_queue_dir: Option<PathBuf>,
+
+    #[arg(long = "no-prompt-queue", default_value_t = false)]
+    no_prompt_queue: bool,
+
+    #[arg(long = "no-restart-exited", default_value_t = false)]
+    no_restart_exited: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManagerWorkerEnqueueArgs {
+    #[arg(value_name = "AGENT_ID")]
+    agent_id: String,
+
+    #[arg(
+        value_name = "PROMPT",
+        required = true,
+        num_args = 1..,
+        trailing_var_arg = true
+    )]
+    prompt: Vec<String>,
+
+    #[arg(long = "prompt-queue-dir", value_name = "DIR")]
+    prompt_queue_dir: Option<PathBuf>,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(crate) enum ManagerPromptDelivery {
     /// Submit if the specialist is waiting; otherwise stage the prompt text.
@@ -250,6 +300,15 @@ impl ManagerCli {
                     args.context_set.as_deref(),
                     args.dry_run,
                     args.json,
+                    &mut stdout,
+                )?;
+            }
+            ManagerSubcommand::WorkerDaemon(args) => runtime.worker_daemon(&args, &mut stdout)?,
+            ManagerSubcommand::WorkerEnqueue(args) => {
+                runtime.worker_enqueue(
+                    &args.agent_id,
+                    &args.prompt.join(" "),
+                    args.prompt_queue_dir.as_deref(),
                     &mut stdout,
                 )?;
             }

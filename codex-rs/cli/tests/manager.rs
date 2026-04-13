@@ -188,6 +188,77 @@ fn manager_worker_prompt_dry_run_uses_specialist_worker_protocol()
 }
 
 #[test]
+fn manager_worker_daemon_dispatches_queued_prompt() -> Result<(), Box<dyn std::error::Error>> {
+    let codex_home = TempDir::new()?;
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
+
+    let codex_bin = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let enqueue_output = codex_command_with_home(&codex_home, &manager_root)?
+        .args([
+            "manager",
+            "--specialist-codex-bin",
+            codex_bin.to_str().expect("utf8 temp path"),
+            "worker-enqueue",
+            "agent-003",
+            "Continue",
+            "with",
+            "the",
+            "persistent",
+            "pool.",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let enqueue_stdout = String::from_utf8(enqueue_output)?;
+    assert!(enqueue_stdout.contains("Queued prompt for agent-003"));
+    assert_eq!(
+        fs::read_dir(manager_root.join("worker-prompts/agent-003"))?.count(),
+        1
+    );
+
+    let daemon_output = codex_command_with_home(&codex_home, &manager_root)?
+        .args([
+            "manager",
+            "--specialist-codex-bin",
+            codex_bin.to_str().expect("utf8 temp path"),
+            "worker-daemon",
+            "--dry-run",
+            "--iterations",
+            "1",
+            "--interval-seconds",
+            "0",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let daemon_stdout = String::from_utf8(daemon_output)?;
+    assert!(daemon_stdout.contains("worker-pool started agents=1"));
+    assert!(daemon_stdout.contains("worker prompt dispatched agent_id=agent-003"));
+    assert!(daemon_stdout.contains("worker turn completed agent_id=agent-003"));
+    assert!(daemon_stdout.contains("worker needs direction agent_id=agent-003"));
+    assert_eq!(
+        fs::read_dir(manager_root.join("worker-prompts/agent-003"))?.count(),
+        0
+    );
+    assert_eq!(
+        fs::read_dir(manager_root.join("worker-prompts/.processed/agent-003"))?.count(),
+        1
+    );
+
+    Ok(())
+}
+
+#[test]
 fn manager_list_and_pings_use_manager_workspace() -> Result<(), Box<dyn std::error::Error>> {
     let tempdir = TempDir::new()?;
     let manager_root = tempdir.path().join("manager");

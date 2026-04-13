@@ -83,6 +83,20 @@ codex manager worker-prompt agent-003 Continue the source review.
 codex manager worker-prompt --dry-run agent-003 Test the worker protocol only.
 ```
 
+Run active specialists as a persistent worker pool:
+
+```bash
+codex manager worker-daemon --interval-seconds 30
+codex manager worker-enqueue agent-003 Continue the source review.
+codex manager worker-daemon --dry-run --iterations 1
+```
+
+`worker-daemon` starts one `codex specialist worker` child per active agent,
+polls status, restarts exited workers by default, and watches
+`worker-prompts/<agent-id>/*.md` for queued prompts. `worker-enqueue` writes
+those prompt files so a second terminal can feed a running worker daemon without
+attaching to its process.
+
 Run from inside a manager workspace, or pass an explicit workspace:
 
 ```bash
