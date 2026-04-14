@@ -54,7 +54,9 @@ codex manager worker-enqueue agent-003 Continue the review.
 sends heartbeat status check-ins after the worker has been quiet; the default
 heartbeat is 15 minutes. When attached to a terminal, it accepts interactive
 commands: `help`, `agents`, `status [agent-id|all]`,
-`prompt <agent-id> <message>`, and `quit`.
+`prompt <agent-id> <message>`, `chat <agent-id>`, `chat off`,
+`@<agent-id> <message>`, and `quit`. After `chat <agent-id>`, plain text lines
+are sent to that worker and queued if the worker is busy.
 
 This bootstrap is intentionally separate from `docs/specialist-bootstrap/` so
 manager and specialist templates can evolve independently.

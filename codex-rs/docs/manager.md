@@ -109,8 +109,15 @@ help
 agents
 status [agent-id|all]
 prompt <agent-id> <message>
+chat <agent-id>
+chat off
+@<agent-id> <message>
 quit
 ```
+
+After `chat <agent-id>`, plain text lines are sent to that worker. If the worker
+is busy and the prompt queue is enabled, the line is queued for the worker's next
+idle turn.
 
 Use `--no-interactive` to run it as a pure foreground monitor, or
 `--interactive` to force the console when stdin is not detected as a terminal.

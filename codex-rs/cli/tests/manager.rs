@@ -328,7 +328,7 @@ fn manager_worker_daemon_accepts_interactive_console_commands()
             "900",
         ])
         .write_stdin(
-            "agents\nstatus agent-003\nprompt agent-003 Continue through the console.\nquit\n",
+            "agents\nstatus agent-003\nchat agent-003\nContinue through chat mode.\n@agent-003 Continue through shorthand.\nquit\n",
         )
         .assert()
         .success()
@@ -339,7 +339,10 @@ fn manager_worker_daemon_accepts_interactive_console_commands()
     assert!(stdout.contains("interactive console enabled"));
     assert!(stdout.contains("agent-003\tidle"));
     assert!(stdout.contains("worker status requested agent_id=agent-003 reason=console"));
+    assert!(stdout.contains("chat target set agent_id=agent-003"));
     assert!(stdout.contains("worker prompt sent agent_id=agent-003"));
+    assert!(stdout.contains("worker busy agent_id=agent-003; prompt queued"));
+    assert!(stdout.contains("Queued prompt for agent-003"));
     assert!(stdout.contains("worker-daemon shutdown requested from console"));
 
     Ok(())

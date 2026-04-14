@@ -1,6 +1,7 @@
 use super::ManagerWorkerDaemonArgs;
 use super::runtime::ManagerRuntime;
 use super::worker_pool_console::ConsoleMessage;
+use super::worker_pool_console::ConsoleState;
 use super::worker_pool_console::start_console_if_enabled;
 use super::worker_pool_process::WorkerPoolMessage;
 use super::worker_pool_process::WorkerProcess;
@@ -63,6 +64,7 @@ impl ManagerRuntime {
                 .unwrap_or_else(|| "disabled".to_string())
         )?;
         let console_receiver = start_console_if_enabled(args, writer)?;
+        let mut console_state = ConsoleState::default();
 
         let mut iteration = 0_u64;
         let mut shutdown_requested = false;
@@ -86,8 +88,13 @@ impl ManagerRuntime {
                 self.dispatch_prompt_queue(prompt_queue_dir, &mut workers, writer)?;
             }
             if let Some(console_receiver) = console_receiver.as_ref() {
-                shutdown_requested |=
-                    self.drain_console_messages(console_receiver, &mut workers, writer)?;
+                shutdown_requested |= self.drain_console_messages(
+                    console_receiver,
+                    &mut console_state,
+                    prompt_queue_dir.as_deref(),
+                    &mut workers,
+                    writer,
+                )?;
             }
             self.drain_worker_messages(
                 &receiver,
@@ -107,7 +114,10 @@ impl ManagerRuntime {
             }
             shutdown_requested |= self.wait_for_next_iteration(
                 &receiver,
-                console_receiver.as_ref(),
+                console_receiver
+                    .as_ref()
+                    .map(|receiver| (receiver, &mut console_state)),
+                prompt_queue_dir.as_deref(),
                 &mut workers,
                 Duration::from_secs(args.interval_seconds),
                 writer,
@@ -287,7 +297,8 @@ impl ManagerRuntime {
     fn wait_for_next_iteration<W: Write>(
         &self,
         worker_receiver: &Receiver<WorkerPoolMessage>,
-        console_receiver: Option<&Receiver<ConsoleMessage>>,
+        mut console: Option<(&Receiver<ConsoleMessage>, &mut ConsoleState)>,
+        prompt_queue_dir: Option<&Path>,
         workers: &mut BTreeMap<String, WorkerProcess>,
         wait: Duration,
         writer: &mut W,
@@ -295,9 +306,14 @@ impl ManagerRuntime {
         let deadline = Instant::now() + wait;
         let mut shutdown_requested = false;
         loop {
-            if let Some(console_receiver) = console_receiver {
-                shutdown_requested |=
-                    self.drain_console_messages(console_receiver, workers, writer)?;
+            if let Some((console_receiver, console_state)) = console.as_mut() {
+                shutdown_requested |= self.drain_console_messages(
+                    console_receiver,
+                    console_state,
+                    prompt_queue_dir,
+                    workers,
+                    writer,
+                )?;
                 if shutdown_requested {
                     return Ok(true);
                 }
