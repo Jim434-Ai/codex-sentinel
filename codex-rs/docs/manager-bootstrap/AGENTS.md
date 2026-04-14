@@ -28,8 +28,8 @@ specialist workspaces.
 
 - Each managed agent must have a registry entry in `agents.tsv`.
 - The manager owns normal lifecycle operations through `codex manager`.
-- tmux may be used as an observer/compatibility layer while the worker protocol
-  matures.
+- tmux is the default compatibility layer for normal interactive specialist
+  sessions while the worker protocol matures.
 - Do not start, restart, or replace `paused`, `closed`, or `user-control`
   sessions without user direction.
 - When restarting after a crash, preserve the specialist workspace and resume

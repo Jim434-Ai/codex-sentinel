@@ -58,7 +58,7 @@ codex manager start-active
 codex manager check agent-003 --lines 120
 codex manager cycle --lines 80
 codex manager watch --interval-seconds 30
-codex manager daemon --restart-missing
+codex manager daemon --restart-missing --restart-errors --auto-nudge
 codex manager stop agent-003
 codex manager restart agent-003
 ```
@@ -73,6 +73,14 @@ codex manager prompt agent-003 --delivery submit Continue now.
 
 `auto` submits when the specialist looks idle at the prompt and stages the text
 without pressing Enter when the specialist looks busy.
+
+For the tmux-first operating model, run specialists as normal interactive
+`codex --specialist --no-alt-screen` sessions and let `manager daemon` keep the
+sessions alive. `--restart-missing` starts missing sessions, `--restart-errors`
+restarts panes whose captured output looks crashed or errored, and
+`--auto-nudge` submits a bounded continuation prompt only when a specialist is
+waiting at a normal prompt. Each daemon iteration writes
+`.codex-manager/supervisor-status.tsv` unless `--no-status-file` is set.
 
 Use the worker-backed path when you want a structured one-shot protocol instead
 of a live TUI pane:

@@ -161,6 +161,28 @@ pub(crate) struct ManagerDaemonArgs {
 
     #[arg(long = "restart-missing", default_value_t = false)]
     restart_missing: bool,
+
+    #[arg(long = "restart-errors", default_value_t = false)]
+    restart_errors: bool,
+
+    #[arg(long = "auto-nudge", default_value_t = false)]
+    auto_nudge: bool,
+
+    #[arg(
+        long = "nudge-prompt",
+        default_value = "Continue the approved current objective. If you are blocked or need user direction, say exactly what you need."
+    )]
+    nudge_prompt: String,
+
+    #[arg(
+        long = "status-file",
+        value_name = "FILE",
+        default_value = ".codex-manager/supervisor-status.tsv"
+    )]
+    status_file: PathBuf,
+
+    #[arg(long = "no-status-file", default_value_t = false)]
+    no_status_file: bool,
 }
 
 #[derive(Debug, Args)]

@@ -32,8 +32,14 @@ codex manager validate
 codex manager start-active
 codex manager cycle --lines 80
 codex manager watch --interval-seconds 30
-codex manager daemon --restart-missing
+codex manager daemon --restart-missing --restart-errors --auto-nudge
 ```
+
+The tmux-first daemon keeps normal interactive specialist sessions alive. It
+restarts missing sessions with `--restart-missing`, restarts captured crash/error
+panes with `--restart-errors`, and only nudges specialists at a normal prompt
+when `--auto-nudge` is set. Each loop writes
+`.codex-manager/supervisor-status.tsv` unless disabled.
 
 Use direct prompt delivery for tmux-backed specialists:
 
