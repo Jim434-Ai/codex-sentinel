@@ -1,5 +1,7 @@
 use super::ManagerWorkerDaemonArgs;
 use super::runtime::ManagerRuntime;
+use super::worker_pool_console::ConsoleMessage;
+use super::worker_pool_console::start_console_if_enabled;
 use super::worker_pool_process::WorkerPoolMessage;
 use super::worker_pool_process::WorkerProcess;
 use super::worker_pool_process::wait_or_kill_worker;
@@ -60,8 +62,10 @@ impl ManagerRuntime {
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "disabled".to_string())
         )?;
+        let console_receiver = start_console_if_enabled(args, writer)?;
 
         let mut iteration = 0_u64;
+        let mut shutdown_requested = false;
         loop {
             iteration += 1;
             writeln!(writer, "== worker-daemon iteration {iteration} ==")?;
@@ -81,6 +85,10 @@ impl ManagerRuntime {
             if let Some(prompt_queue_dir) = prompt_queue_dir.as_ref() {
                 self.dispatch_prompt_queue(prompt_queue_dir, &mut workers, writer)?;
             }
+            if let Some(console_receiver) = console_receiver.as_ref() {
+                shutdown_requested |=
+                    self.drain_console_messages(console_receiver, &mut workers, writer)?;
+            }
             self.drain_worker_messages(
                 &receiver,
                 &mut workers,
@@ -89,17 +97,24 @@ impl ManagerRuntime {
             )?;
             writer.flush().context("flush worker daemon output")?;
 
+            if shutdown_requested {
+                break;
+            }
             if let Some(iterations) = args.iterations
                 && iteration >= u64::from(iterations)
             {
                 break;
             }
-            self.drain_worker_messages(
+            shutdown_requested |= self.wait_for_next_iteration(
                 &receiver,
+                console_receiver.as_ref(),
                 &mut workers,
                 Duration::from_secs(args.interval_seconds),
                 writer,
             )?;
+            if shutdown_requested {
+                break;
+            }
         }
 
         self.shutdown_worker_pool(workers, &receiver, writer)
@@ -267,6 +282,39 @@ impl ManagerRuntime {
             )?;
         }
         Ok(())
+    }
+
+    fn wait_for_next_iteration<W: Write>(
+        &self,
+        worker_receiver: &Receiver<WorkerPoolMessage>,
+        console_receiver: Option<&Receiver<ConsoleMessage>>,
+        workers: &mut BTreeMap<String, WorkerProcess>,
+        wait: Duration,
+        writer: &mut W,
+    ) -> anyhow::Result<bool> {
+        let deadline = Instant::now() + wait;
+        let mut shutdown_requested = false;
+        loop {
+            if let Some(console_receiver) = console_receiver {
+                shutdown_requested |=
+                    self.drain_console_messages(console_receiver, workers, writer)?;
+                if shutdown_requested {
+                    return Ok(true);
+                }
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            self.drain_worker_messages(
+                worker_receiver,
+                workers,
+                (deadline - now).min(Duration::from_millis(EVENT_DRAIN_MILLIS)),
+                writer,
+            )?;
+            writer.flush().context("flush worker daemon output")?;
+        }
+        Ok(false)
     }
 
     fn restart_exited_workers<W: Write>(

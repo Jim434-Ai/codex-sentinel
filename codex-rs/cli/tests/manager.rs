@@ -302,6 +302,50 @@ fn manager_worker_daemon_uses_heartbeat_for_status_checkins()
 }
 
 #[test]
+fn manager_worker_daemon_accepts_interactive_console_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let codex_home = TempDir::new()?;
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
+
+    let codex_bin = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let output = codex_command_with_home(&codex_home, &manager_root)?
+        .args([
+            "manager",
+            "--specialist-codex-bin",
+            codex_bin.to_str().expect("utf8 temp path"),
+            "worker-daemon",
+            "--dry-run",
+            "--interactive",
+            "--interval-seconds",
+            "0",
+            "--heartbeat-seconds",
+            "900",
+        ])
+        .write_stdin(
+            "agents\nstatus agent-003\nprompt agent-003 Continue through the console.\nquit\n",
+        )
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output)?;
+    assert!(stdout.contains("interactive console enabled"));
+    assert!(stdout.contains("agent-003\tidle"));
+    assert!(stdout.contains("worker status requested agent_id=agent-003 reason=console"));
+    assert!(stdout.contains("worker prompt sent agent_id=agent-003"));
+    assert!(stdout.contains("worker-daemon shutdown requested from console"));
+
+    Ok(())
+}
+
+#[test]
 fn manager_list_and_pings_use_manager_workspace() -> Result<(), Box<dyn std::error::Error>> {
     let tempdir = TempDir::new()?;
     let manager_root = tempdir.path().join("manager");

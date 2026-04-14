@@ -2,6 +2,7 @@ mod runtime;
 mod supervisor;
 mod worker_backend;
 mod worker_pool;
+mod worker_pool_console;
 mod worker_pool_process;
 mod worker_pool_queue;
 mod workspace;
@@ -213,6 +214,12 @@ pub(crate) struct ManagerWorkerDaemonArgs {
 
     #[arg(long = "dry-run", default_value_t = false)]
     dry_run: bool,
+
+    #[arg(long = "interactive", default_value_t = false)]
+    interactive: bool,
+
+    #[arg(long = "no-interactive", default_value_t = false)]
+    no_interactive: bool,
 
     #[arg(long = "prompt-queue-dir", value_name = "DIR")]
     prompt_queue_dir: Option<PathBuf>,

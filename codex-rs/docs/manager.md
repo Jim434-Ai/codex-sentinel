@@ -101,6 +101,20 @@ heartbeat window. The default heartbeat is 900 seconds and can be changed with
 `worker-enqueue` writes prompt files so a second terminal can feed a running
 worker daemon without attaching to its process.
 
+When `worker-daemon` is attached to a terminal, it also enables an interactive
+console. Console commands:
+
+```text
+help
+agents
+status [agent-id|all]
+prompt <agent-id> <message>
+quit
+```
+
+Use `--no-interactive` to run it as a pure foreground monitor, or
+`--interactive` to force the console when stdin is not detected as a terminal.
+
 Run from inside a manager workspace, or pass an explicit workspace:
 
 ```bash

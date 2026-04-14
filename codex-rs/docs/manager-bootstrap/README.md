@@ -52,7 +52,9 @@ codex manager worker-enqueue agent-003 Continue the review.
 
 `worker-daemon` is event-first. It requests status at startup and then only
 sends heartbeat status check-ins after the worker has been quiet; the default
-heartbeat is 15 minutes.
+heartbeat is 15 minutes. When attached to a terminal, it accepts interactive
+commands: `help`, `agents`, `status [agent-id|all]`,
+`prompt <agent-id> <message>`, and `quit`.
 
 This bootstrap is intentionally separate from `docs/specialist-bootstrap/` so
 manager and specialist templates can evolve independently.
