@@ -65,6 +65,12 @@ pub struct Usage {
     pub cached_input_tokens: i64,
     /// The number of output tokens used during the turn.
     pub output_tokens: i64,
+    /// The total number of tokens in the thread after the turn.
+    #[serde(default)]
+    pub total_tokens: i64,
+    /// The model context window used to derive context remaining, when known.
+    #[serde(default)]
+    pub model_context_window: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

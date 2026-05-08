@@ -6,11 +6,25 @@ use codex_specialist::SpecialistWorkerCommand;
 use codex_specialist::SpecialistWorkerEvent;
 use codex_specialist::decode_worker_event;
 use codex_specialist::encode_worker_command;
+use serde::Deserialize;
+use serde::Serialize;
+use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
+
+pub(crate) struct WorkerPromptRequest<'a> {
+    pub(crate) agent_id: &'a str,
+    pub(crate) prompt: &'a str,
+    pub(crate) context_set: Option<&'a str>,
+    pub(crate) idempotency_key: Option<&'a str>,
+    pub(crate) dry_run: bool,
+    pub(crate) json: bool,
+    pub(crate) ack_json: bool,
+}
 
 impl ManagerRuntime {
     pub(crate) fn worker_status<W: Write>(
@@ -35,40 +49,98 @@ impl ManagerRuntime {
                 },
             ],
             writer,
-        )
+        )?;
+        Ok(())
     }
 
     pub(crate) fn worker_prompt<W: Write>(
         &self,
-        agent_id: &str,
-        prompt: &str,
-        context_set: Option<&str>,
-        dry_run: bool,
-        json: bool,
+        request: WorkerPromptRequest<'_>,
         writer: &mut W,
     ) -> anyhow::Result<()> {
+        let WorkerPromptRequest {
+            agent_id,
+            prompt,
+            context_set,
+            idempotency_key,
+            dry_run,
+            json,
+            ack_json,
+        } = request;
         let prompt = prompt.trim();
         if prompt.is_empty() {
             bail!("prompt must not be empty");
         }
 
         let command_id = next_command_id("prompt");
-        self.run_worker_commands(
-            agent_id,
-            context_set,
-            dry_run,
-            json,
-            vec![
-                SpecialistWorkerCommand::Prompt {
-                    id: command_id.clone(),
-                    prompt: prompt.to_string(),
-                },
-                SpecialistWorkerCommand::Shutdown {
-                    id: format!("{command_id}-shutdown"),
-                },
-            ],
-            writer,
-        )
+        let agent = self.workspace.agent(agent_id)?;
+        let message_id = idempotency_key
+            .map(ToString::to_string)
+            .unwrap_or_else(|| command_id.clone());
+        if let Some(idempotency_key) = idempotency_key {
+            let ack_path = self.worker_prompt_ack_path(&agent.agent_id, idempotency_key);
+            if ack_path.is_file() {
+                let ack = fs::read_to_string(&ack_path)
+                    .with_context(|| format!("read worker prompt ack {}", ack_path.display()))?;
+                let mut parsed: WorkerPromptAck = serde_json::from_str(&ack)
+                    .with_context(|| format!("parse worker prompt ack {}", ack_path.display()))?;
+                parsed.duplicate = true;
+                if ack_json {
+                    writeln!(writer, "{}", serde_json::to_string_pretty(&parsed)?)?;
+                } else {
+                    writeln!(
+                        writer,
+                        "worker prompt already handled agent_id={} message_id={} duplicate={}",
+                        agent.agent_id, idempotency_key, parsed.duplicate
+                    )?;
+                }
+                return Ok(());
+            }
+        }
+
+        let commands = vec![
+            SpecialistWorkerCommand::Prompt {
+                id: command_id.clone(),
+                prompt: prompt.to_string(),
+            },
+            SpecialistWorkerCommand::Shutdown {
+                id: format!("{command_id}-shutdown"),
+            },
+        ];
+        let events = if ack_json {
+            let mut sink = std::io::sink();
+            self.run_worker_commands(
+                agent_id,
+                context_set,
+                dry_run,
+                /*json*/ false,
+                commands,
+                &mut sink,
+            )?
+        } else {
+            self.run_worker_commands(agent_id, context_set, dry_run, json, commands, writer)?
+        };
+        let ack = worker_prompt_ack(&agent.agent_id, &message_id, &command_id, &events);
+        if let Some(idempotency_key) = idempotency_key {
+            let ack_path = self.worker_prompt_ack_path(&agent.agent_id, idempotency_key);
+            if let Some(parent) = ack_path.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("create worker prompt ack dir {}", parent.display())
+                })?;
+            }
+            fs::write(&ack_path, serde_json::to_string_pretty(&ack)?)
+                .with_context(|| format!("write worker prompt ack {}", ack_path.display()))?;
+        }
+        if ack_json {
+            writeln!(writer, "{}", serde_json::to_string_pretty(&ack)?)?;
+        } else if ack.accepted {
+            writeln!(
+                writer,
+                "worker prompt acknowledged agent_id={} message_id={} started={}",
+                agent.agent_id, message_id, ack.started
+            )?;
+        }
+        Ok(())
     }
 
     fn run_worker_commands<W: Write>(
@@ -79,7 +151,7 @@ impl ManagerRuntime {
         json: bool,
         commands: Vec<SpecialistWorkerCommand>,
         writer: &mut W,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<SpecialistWorkerEvent>> {
         let agent = self.workspace.agent(agent_id)?;
         if !agent.workspace.is_dir() {
             bail!(
@@ -130,6 +202,7 @@ impl ManagerRuntime {
             .wait_with_output()
             .context("wait for specialist worker")?;
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut events = Vec::new();
         for line in stdout.lines() {
             if json {
                 writeln!(writer, "{line}")?;
@@ -138,6 +211,13 @@ impl ManagerRuntime {
                     format!("decode specialist worker event from line `{line}`")
                 })?;
                 print_worker_event(writer, &event)?;
+                events.push(event);
+            }
+            if json {
+                let event = decode_worker_event(line).with_context(|| {
+                    format!("decode specialist worker event from line `{line}`")
+                })?;
+                events.push(event);
             }
         }
 
@@ -148,8 +228,67 @@ impl ManagerRuntime {
             "ran worker protocol command for {}",
             agent.agent_id
         ))?;
-        Ok(())
+        Ok(events)
     }
+
+    fn worker_prompt_ack_path(&self, agent_id: &str, idempotency_key: &str) -> PathBuf {
+        self.workspace
+            .root
+            .join(".codex-manager")
+            .join("message-acks")
+            .join(sanitize_ack_component(agent_id))
+            .join(format!("{}.json", sanitize_ack_component(idempotency_key)))
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerPromptAck {
+    accepted: bool,
+    started: bool,
+    message_id: String,
+    session_id: String,
+    duplicate: bool,
+    error: Option<String>,
+}
+
+fn worker_prompt_ack(
+    agent_id: &str,
+    message_id: &str,
+    command_id: &str,
+    events: &[SpecialistWorkerEvent],
+) -> WorkerPromptAck {
+    let started = events.iter().any(|event| {
+        matches!(event, SpecialistWorkerEvent::TurnStarted { command_id: id } if id == command_id)
+    });
+    let error = events.iter().find_map(|event| {
+        if let SpecialistWorkerEvent::Error { message, .. } = event {
+            Some(message.clone())
+        } else {
+            None
+        }
+    });
+    WorkerPromptAck {
+        accepted: error.is_none(),
+        started,
+        message_id: message_id.to_string(),
+        session_id: agent_id.to_string(),
+        duplicate: false,
+        error,
+    }
+}
+
+fn sanitize_ack_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn print_worker_event<W: Write>(

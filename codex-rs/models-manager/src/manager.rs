@@ -351,14 +351,38 @@ impl ModelsManager {
         Self::find_model_by_longest_prefix(suffix, candidates)
     }
 
+    fn find_model_by_exact_slug(model: &str, candidates: &[ModelInfo]) -> Option<ModelInfo> {
+        candidates
+            .iter()
+            .find(|candidate| candidate.slug == model)
+            .cloned()
+    }
+
+    fn gpt_55_metadata_from_gpt_54(model: &str, candidates: &[ModelInfo]) -> Option<ModelInfo> {
+        if model != "gpt-5.5" {
+            return None;
+        }
+        let mut model_info = Self::find_model_by_exact_slug("gpt-5.4", candidates)?;
+        model_info.slug = "gpt-5.5".to_string();
+        model_info.display_name = "gpt-5.5".to_string();
+        model_info.description =
+            Some("A new class of intelligence for coding and professional work.".to_string());
+        model_info.context_window = Some(1_000_000);
+        model_info.upgrade = None;
+        Some(model_info)
+    }
+
     fn construct_model_info_from_candidates(
         model: &str,
         candidates: &[ModelInfo],
         config: &ModelsManagerConfig,
     ) -> ModelInfo {
-        // First use the normal longest-prefix match. If that misses, allow a narrowly scoped
-        // retry for namespaced slugs like `custom/gpt-5.3-codex`.
-        let remote = Self::find_model_by_longest_prefix(model, candidates)
+        // Prefer exact matches, then local compatibility shims for current known model aliases,
+        // then the normal longest-prefix match. If that misses, allow a narrowly scoped retry for
+        // namespaced slugs like `custom/gpt-5.3-codex`.
+        let remote = Self::find_model_by_exact_slug(model, candidates)
+            .or_else(|| Self::gpt_55_metadata_from_gpt_54(model, candidates))
+            .or_else(|| Self::find_model_by_longest_prefix(model, candidates))
             .or_else(|| Self::find_model_by_namespaced_suffix(model, candidates));
         let model_info = if let Some(remote) = remote {
             ModelInfo {

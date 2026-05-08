@@ -9,6 +9,7 @@ use codex_login::CodexAuth;
 use codex_model_provider_info::WireApi;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::openai_models::ModelsResponse;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::responses::mount_models_once;
 use http::HeaderMap;
@@ -270,6 +271,32 @@ async fn get_model_info_tracks_fallback_usage() {
         .await;
     assert!(unknown.used_fallback_model_metadata);
     assert_eq!(unknown.slug, "model-that-does-not-exist");
+}
+
+#[tokio::test]
+async fn get_model_info_synthesizes_gpt_55_when_catalog_lacks_exact_entry() {
+    let codex_home = tempdir().expect("temp dir");
+    let config = ModelsManagerConfig::default();
+    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let manager = ModelsManager::new(
+        codex_home.path().to_path_buf(),
+        auth_manager,
+        /*model_catalog*/ None,
+        CollaborationModesConfig::default(),
+    );
+
+    let model_info = manager.get_model_info("gpt-5.5", &config).await;
+
+    assert_eq!(model_info.slug, "gpt-5.5");
+    assert_eq!(model_info.display_name, "gpt-5.5");
+    assert_eq!(model_info.context_window, Some(1_000_000));
+    assert!(!model_info.used_fallback_model_metadata);
+    assert!(
+        model_info
+            .supported_reasoning_levels
+            .iter()
+            .any(|level| level.effort == ReasoningEffort::XHigh)
+    );
 }
 
 #[tokio::test]

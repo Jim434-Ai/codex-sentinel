@@ -81,6 +81,7 @@ use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadRollbackResponse;
+use codex_app_server_protocol::ThreadTokenUsageUpdatedNotification;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnError as AppServerTurnError;
@@ -146,6 +147,8 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use tokio::select;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
@@ -300,6 +303,13 @@ impl AppExitInfo {
             exit_reason: ExitReason::Fatal(message.into()),
         }
     }
+}
+
+fn current_unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug)]
@@ -1190,6 +1200,35 @@ impl App {
                 tracing::warn!("{message}");
                 self.chat_widget.add_error_message(message);
             }
+        }
+    }
+
+    fn write_specialist_context_snapshot_for_notification(
+        &self,
+        notification: &ThreadTokenUsageUpdatedNotification,
+    ) {
+        let Some(specialist_session) = self.specialist_session.as_ref() else {
+            return;
+        };
+        let Some(model_context_window) = notification.token_usage.model_context_window else {
+            return;
+        };
+        let Some(mut snapshot) = codex_specialist::SpecialistContextSnapshot::from_usage(
+            notification.token_usage.total.total_tokens,
+            model_context_window,
+            current_unix_timestamp(),
+        ) else {
+            return;
+        };
+        snapshot.model = Some(self.chat_widget.current_model().to_string());
+
+        if let Err(err) = codex_specialist::write_latest_context_snapshot(
+            &self.config.codex_home,
+            &specialist_session.workspace.workspace_id,
+            &specialist_session.workspace.issue_id,
+            &snapshot,
+        ) {
+            tracing::warn!("Failed to write specialist context snapshot: {err}");
         }
     }
 
@@ -5809,8 +5848,17 @@ impl App {
                 )) if self.specialist_session.is_some() => Some(notification.clone()),
                 _ => None,
             };
+        let specialist_token_usage_updated = match &event {
+            ThreadBufferedEvent::Notification(ServerNotification::ThreadTokenUsageUpdated(
+                notification,
+            )) if self.specialist_session.is_some() => Some(notification.clone()),
+            _ => None,
+        };
 
         self.handle_thread_event_now(event);
+        if let Some(notification) = specialist_token_usage_updated {
+            self.write_specialist_context_snapshot_for_notification(&notification);
+        }
         if let Some(notification) = specialist_turn_completed {
             self.write_specialist_checkpoint_for_notification(app_server, &notification)
                 .await;
@@ -7626,6 +7674,43 @@ files = [
             app.chat_widget.status_line_text(),
             Some("950K window".into())
         );
+    }
+
+    #[tokio::test]
+    async fn token_usage_update_writes_specialist_context_snapshot() -> Result<()> {
+        let mut app = make_test_app().await;
+        let codex_home = tempdir()?;
+        let fixture = SpecialistFixture::new()?;
+        let specialist_session = load_specialist_session(&fixture.workspace_root, None, None, None)
+            .map_err(|err| color_eyre::eyre::eyre!("{err}"))?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+        app.specialist_session = Some(specialist_session);
+
+        let notification = match token_usage_notification(ThreadId::new(), "turn-1", Some(100)) {
+            ServerNotification::ThreadTokenUsageUpdated(notification) => notification,
+            _ => panic!("expected token usage notification"),
+        };
+        let current_model = app.chat_widget.current_model().to_string();
+        app.write_specialist_context_snapshot_for_notification(&notification);
+
+        let snapshot = codex_specialist::read_latest_context_snapshot(
+            codex_home.path(),
+            "matter",
+            "issue-123",
+        )
+        .map_err(|err| color_eyre::eyre::eyre!("{err}"))?
+        .expect("context snapshot");
+        assert_eq!(
+            snapshot.level,
+            codex_specialist::SpecialistContextLevel::High
+        );
+        assert_eq!(snapshot.model.as_deref(), Some(current_model.as_str()));
+        assert_eq!(snapshot.percent_remaining, 90);
+        assert_eq!(snapshot.tokens_remaining, 90);
+        assert_eq!(snapshot.model_context_window, 100);
+        assert!(!snapshot.compression_expected_soon);
+        assert!(snapshot.safe_to_continue);
+        Ok(())
     }
 
     #[tokio::test]

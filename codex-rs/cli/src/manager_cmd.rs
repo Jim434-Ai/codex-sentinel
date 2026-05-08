@@ -1,4 +1,5 @@
 mod runtime;
+mod source_audit;
 mod supervisor;
 mod worker_backend;
 mod worker_pool;
@@ -12,6 +13,7 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use runtime::ManagerRuntime;
 use std::path::PathBuf;
+use worker_backend::WorkerPromptRequest;
 use workspace::ManagerWorkspace;
 
 #[derive(Debug, clap::Parser)]
@@ -67,6 +69,9 @@ enum ManagerSubcommand {
     /// Check pings and every active registered agent.
     Cycle(ManagerCycleArgs),
 
+    /// Consume structured specialist events with acknowledgement/idempotency.
+    ProcessEvents(ManagerProcessEventsArgs),
+
     /// Watch active specialists and report status changes.
     Watch(ManagerWatchArgs),
 
@@ -87,6 +92,15 @@ enum ManagerSubcommand {
 
     /// Queue a prompt file for a running worker-daemon.
     WorkerEnqueue(ManagerWorkerEnqueueArgs),
+
+    /// Inspect and update the structured manager agent registry.
+    Agents(ManagerAgentsArgs),
+
+    /// Generate a manager dashboard from structured registry data.
+    Dashboard(ManagerDashboardArgs),
+
+    /// Inspect or open observer windows for managed specialists.
+    Observers(ManagerObserversArgs),
 }
 
 #[derive(Debug, Args)]
@@ -108,6 +122,15 @@ struct ManagerCaptureArgs {
 struct ManagerCycleArgs {
     #[arg(long = "lines", default_value_t = 80)]
     lines: usize,
+}
+
+#[derive(Debug, Args)]
+struct ManagerProcessEventsArgs {
+    #[arg(long = "event-dir", value_name = "DIR", default_value = "pings")]
+    event_dir: PathBuf,
+
+    #[arg(long = "dry-run", default_value_t = false)]
+    dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -204,17 +227,25 @@ struct ManagerWorkerPromptArgs {
 
     #[arg(
         value_name = "PROMPT",
-        required = true,
-        num_args = 1..,
+        num_args = 0..,
         trailing_var_arg = true
     )]
     prompt: Vec<String>,
+
+    #[arg(long = "message-file", value_name = "FILE")]
+    message_file: Option<PathBuf>,
+
+    #[arg(long = "idempotency-key", value_name = "KEY")]
+    idempotency_key: Option<String>,
 
     #[arg(long = "context-set", value_name = "NAME")]
     context_set: Option<String>,
 
     #[arg(long = "dry-run", default_value_t = false)]
     dry_run: bool,
+
+    #[arg(long = "ack-json", default_value_t = false)]
+    ack_json: bool,
 
     #[arg(long = "json", default_value_t = false)]
     json: bool,
@@ -270,6 +301,104 @@ struct ManagerWorkerEnqueueArgs {
     prompt_queue_dir: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct ManagerAgentsArgs {
+    #[command(subcommand)]
+    command: ManagerAgentsSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ManagerAgentsSubcommand {
+    /// List registered agents.
+    List(ManagerAgentsListArgs),
+
+    /// Print one registered agent status.
+    Status(ManagerAgentsStatusArgs),
+
+    /// Export registered agents as structured JSON.
+    Export(ManagerAgentsExportArgs),
+
+    /// Validate the structured registry output against the agent registry schema.
+    ValidateSchema,
+
+    /// Mark one registered agent paused without deleting workspace data.
+    Pause(ManagerAgentArgs),
+
+    /// Start every non-paused, non-closed registered agent.
+    StartActive,
+
+    /// Snapshot or compare read-only source roots for mutation audits.
+    SourceAudit(ManagerAgentsSourceAuditArgs),
+}
+
+#[derive(Debug, Args)]
+struct ManagerAgentsListArgs {
+    #[arg(long = "json", default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManagerAgentsStatusArgs {
+    agent_id: String,
+
+    #[arg(long = "json", default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManagerAgentsExportArgs {
+    #[arg(long = "output", value_name = "FILE", default_value = "agents.json")]
+    output: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct ManagerAgentsSourceAuditArgs {
+    #[arg(long = "output", value_name = "FILE")]
+    output: Option<PathBuf>,
+
+    #[arg(long = "compare", value_name = "FILE")]
+    compare: Option<PathBuf>,
+
+    #[arg(long = "json", default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManagerDashboardArgs {
+    #[arg(long = "output", value_name = "FILE")]
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct ManagerObserversArgs {
+    #[command(subcommand)]
+    command: ManagerObserversSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ManagerObserversSubcommand {
+    /// List observer/session state.
+    List(ManagerObserversListArgs),
+
+    /// Open or print the observer attach command for one agent.
+    Open(ManagerObserversOpenArgs),
+}
+
+#[derive(Debug, Args)]
+struct ManagerObserversListArgs {
+    #[arg(long = "json", default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManagerObserversOpenArgs {
+    #[arg(value_name = "AGENT_ID")]
+    agent_id: String,
+
+    #[arg(long = "dry-run", default_value_t = false)]
+    dry_run: bool,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(crate) enum ManagerPromptDelivery {
     /// Submit if the specialist is waiting; otherwise stage the prompt text.
@@ -306,6 +435,9 @@ impl ManagerCli {
             }
             ManagerSubcommand::Pings => runtime.list_pings(&mut stdout)?,
             ManagerSubcommand::Cycle(args) => runtime.cycle(args.lines, &mut stdout)?,
+            ManagerSubcommand::ProcessEvents(args) => {
+                runtime.process_events(&args.event_dir, args.dry_run, &mut stdout)?;
+            }
             ManagerSubcommand::Watch(args) => runtime.watch(&args, &mut stdout)?,
             ManagerSubcommand::Prompt(args) => {
                 runtime.prompt_agent(
@@ -326,12 +458,21 @@ impl ManagerCli {
                 )?;
             }
             ManagerSubcommand::WorkerPrompt(args) => {
+                let prompt = if let Some(message_file) = args.message_file.as_ref() {
+                    std::fs::read_to_string(message_file)?
+                } else {
+                    args.prompt.join(" ")
+                };
                 runtime.worker_prompt(
-                    &args.agent_id,
-                    &args.prompt.join(" "),
-                    args.context_set.as_deref(),
-                    args.dry_run,
-                    args.json,
+                    WorkerPromptRequest {
+                        agent_id: &args.agent_id,
+                        prompt: &prompt,
+                        context_set: args.context_set.as_deref(),
+                        idempotency_key: args.idempotency_key.as_deref(),
+                        dry_run: args.dry_run,
+                        json: args.json,
+                        ack_json: args.ack_json,
+                    },
                     &mut stdout,
                 )?;
             }
@@ -344,6 +485,43 @@ impl ManagerCli {
                     &mut stdout,
                 )?;
             }
+            ManagerSubcommand::Agents(args) => match args.command {
+                ManagerAgentsSubcommand::List(args) => {
+                    runtime.agents_list(args.json, &mut stdout)?;
+                }
+                ManagerAgentsSubcommand::Status(args) => {
+                    runtime.agents_status(&args.agent_id, args.json, &mut stdout)?;
+                }
+                ManagerAgentsSubcommand::Export(args) => {
+                    runtime.agents_export(&args.output, &mut stdout)?;
+                }
+                ManagerAgentsSubcommand::ValidateSchema => {
+                    runtime.agents_validate_schema(&mut stdout)?;
+                }
+                ManagerAgentsSubcommand::Pause(args) => {
+                    runtime.agents_pause(&args.agent_id, &mut stdout)?;
+                }
+                ManagerAgentsSubcommand::StartActive => runtime.start_active(&mut stdout)?,
+                ManagerAgentsSubcommand::SourceAudit(args) => {
+                    runtime.agents_source_audit(
+                        args.output.as_deref(),
+                        args.compare.as_deref(),
+                        args.json,
+                        &mut stdout,
+                    )?;
+                }
+            },
+            ManagerSubcommand::Dashboard(args) => {
+                runtime.dashboard(args.output.as_deref(), &mut stdout)?;
+            }
+            ManagerSubcommand::Observers(args) => match args.command {
+                ManagerObserversSubcommand::List(args) => {
+                    runtime.observers_list(args.json, &mut stdout)?;
+                }
+                ManagerObserversSubcommand::Open(args) => {
+                    runtime.observers_open(&args.agent_id, args.dry_run, &mut stdout)?;
+                }
+            },
         }
 
         Ok(())

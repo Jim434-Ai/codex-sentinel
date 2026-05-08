@@ -1226,6 +1226,8 @@ fn token_usage_update_is_emitted_on_turn_completion() {
                     input_tokens: 10,
                     cached_input_tokens: 3,
                     output_tokens: 29,
+                    total_tokens: 42,
+                    model_context_window: Some(128_000),
                 },
             })],
             status: CodexStatus::InitiateShutdown,

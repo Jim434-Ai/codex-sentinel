@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openai.local/codex/schemas/specialist_status.schema.json",
+  "title": "Codex Specialist Status",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "agentId",
+    "workspaceId",
+    "issueId",
+    "workspace",
+    "sessionId",
+    "state",
+    "model",
+    "contextLevel",
+    "contextReport",
+    "currentTask",
+    "lastActivityAt",
+    "newestArtifacts",
+    "blockers",
+    "needsUser",
+    "recommendedNext",
+    "artifactReport",
+    "checkpointPath",
+    "checkpoint"
+  ],
+  "properties": {
+    "agentId": {
+      "type": "string"
+    },
+    "workspaceId": {
+      "type": "string"
+    },
+    "issueId": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "working",
+        "waiting-continuation",
+        "needs-user",
+        "blocked",
+        "error",
+        "stale",
+        "drifting",
+        "paused",
+        "user-control"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contextLevel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contextReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "level",
+        "percentRemaining",
+        "tokensRemaining",
+        "modelContextWindow",
+        "compressionExpectedSoon",
+        "safeToContinue",
+        "unavailableReason"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "runtime",
+            "checkpoint",
+            "unavailable"
+          ]
+        },
+        "level": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "percentRemaining": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "tokensRemaining": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "modelContextWindow": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "compressionExpectedSoon": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "safeToContinue": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "unavailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "currentTask": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lastActivityAt": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "newestArtifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "needsUser": {
+      "type": "boolean"
+    },
+    "recommendedNext": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "artifactReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "createdFiles",
+        "updatedDerivedFiles",
+        "originalSourceFilesConsulted",
+        "verificationCommands"
+      ],
+      "properties": {
+        "createdFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "updatedDerivedFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "originalSourceFilesConsulted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verificationCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "checkpointPath": {
+      "type": "string"
+    },
+    "checkpoint": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  }
+}

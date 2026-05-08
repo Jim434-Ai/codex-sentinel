@@ -122,6 +122,8 @@ impl EventProcessorWithJsonOutput {
             input_tokens: usage.total.input_tokens,
             cached_input_tokens: usage.total.cached_input_tokens,
             output_tokens: usage.total.output_tokens,
+            total_tokens: usage.total.total_tokens,
+            model_context_window: usage.model_context_window,
         }
     }
 

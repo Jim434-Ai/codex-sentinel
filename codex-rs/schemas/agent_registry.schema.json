@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openai.local/codex/schemas/agent_registry.schema.json",
+  "title": "Codex Manager Agent Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "agents"
+  ],
+  "properties": {
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agentId",
+          "matterId",
+          "name",
+          "workspace",
+          "sourceRoots",
+          "sessionId",
+          "role",
+          "lifecycleState",
+          "automationMode",
+          "observerWindowStatus",
+          "currentObjective"
+        ],
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "matterId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workspace": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lifecycleState": {
+            "type": "string",
+            "minLength": 1
+          },
+          "automationMode": {
+            "type": "string",
+            "enum": [
+              "stopped",
+              "observing",
+              "actively-managing"
+            ]
+          },
+          "observerWindowStatus": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "open",
+              "stale",
+              "missing"
+            ]
+          },
+          "currentObjective": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

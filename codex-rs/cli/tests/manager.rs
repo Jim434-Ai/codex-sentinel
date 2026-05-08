@@ -1,4 +1,6 @@
 use assert_cmd::Command;
+use pretty_assertions::assert_eq;
+use serde_json::Value;
 use std::fs;
 use tempfile::TempDir;
 
@@ -95,7 +97,10 @@ fn manager_validate_loads_portable_workspace() -> Result<(), Box<dyn std::error:
     let tempdir = TempDir::new()?;
     let manager_root = tempdir.path().join("manager");
     let specialist_root = tempdir.path().join("specialist");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
     write_manager_workspace(&manager_root, &specialist_root)?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
 
     let output = codex_command(&manager_root)?
         .args(["manager", "validate"])
@@ -110,6 +115,475 @@ fn manager_validate_loads_portable_workspace() -> Result<(), Box<dyn std::error:
     assert!(stdout.contains("Agents: 1"));
     assert!(stdout.contains("Active agents: 1"));
     assert!(stdout.contains("tmux socket: test-socket"));
+
+    Ok(())
+}
+
+#[test]
+fn manager_agents_json_and_pause_update_registry() -> Result<(), Box<dyn std::error::Error>> {
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
+
+    let output = codex_command(&manager_root)?
+        .args(["manager", "agents", "list", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    assert_eq!(json["agents"][0]["agentId"], "agent-003");
+    assert_eq!(json["agents"][0]["matterId"], "matter");
+    assert_eq!(json["agents"][0]["sessionId"], "agent-003");
+    assert_eq!(
+        json["agents"][0]["sourceRoots"],
+        serde_json::json!([source_root.join("corpus").canonicalize()?])
+    );
+    assert_eq!(json["agents"][0]["lifecycleState"], "working");
+    assert_eq!(json["agents"][0]["automationMode"], "actively-managing");
+    assert_eq!(json["agents"][0]["observerWindowStatus"], "unknown");
+
+    let status_output = codex_command(&manager_root)?
+        .args(["manager", "agents", "status", "agent-003", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status: Value = serde_json::from_slice(&status_output)?;
+    assert_eq!(status, json["agents"][0]);
+
+    let pause_output = codex_command(&manager_root)?
+        .args(["manager", "agents", "pause", "agent-003"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let pause_stdout = String::from_utf8(pause_output)?;
+    assert!(pause_stdout.contains("Paused agent-003"));
+    assert!(specialist_root.is_dir());
+    assert!(
+        fs::read_to_string(manager_root.join("agents.tsv"))?
+            .contains("agent-003\tmatter\tVeterans\t")
+    );
+    assert!(
+        fs::read_to_string(manager_root.join("agents.tsv"))?
+            .contains("\tagent-003\tspecialist\tpaused\tContinue NOI work")
+    );
+
+    let paused_output = codex_command(&manager_root)?
+        .args(["manager", "agents", "list", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let paused: Value = serde_json::from_slice(&paused_output)?;
+    assert_eq!(paused["agents"][0]["lifecycleState"], "paused");
+    assert_eq!(paused["agents"][0]["automationMode"], "observing");
+
+    let export_output = codex_command(&manager_root)?
+        .args(["manager", "agents", "export", "--output", "agents.json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let export_stdout = String::from_utf8(export_output)?;
+    assert!(export_stdout.contains("Wrote agent registry"));
+    let exported: Value = serde_json::from_slice(&fs::read(manager_root.join("agents.json"))?)?;
+    assert_eq!(exported, paused);
+
+    let validate_output = codex_command(&manager_root)?
+        .args(["manager", "agents", "validate-schema"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let validate_stdout = String::from_utf8(validate_output)?;
+    assert!(validate_stdout.contains("agent registry validates against"));
+
+    Ok(())
+}
+
+#[test]
+fn manager_agents_json_registry_is_native() -> Result<(), Box<dyn std::error::Error>> {
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = manager_root.join("specialists/veterans");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    fs::create_dir_all(manager_root.join(".codex-manager"))?;
+    fs::create_dir_all(&specialist_root)?;
+    fs::write(manager_root.join("AGENTS.md"), "# Manager Workspace\n")?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
+    fs::write(
+        manager_root.join("agents.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "agents": [
+                {
+                    "agentId": "agent-003",
+                    "matterId": "matter",
+                    "name": "Veterans",
+                    "workspace": "specialists/veterans",
+                    "sourceRoots": [],
+                    "sessionId": "agent-003",
+                    "role": "specialist",
+                    "lifecycleState": "working",
+                    "automationMode": "actively-managing",
+                    "observerWindowStatus": "unknown",
+                    "currentObjective": "Continue NOI work"
+                }
+            ]
+        }))?,
+    )?;
+
+    let output = codex_command(&manager_root)?
+        .args(["manager", "agents", "list", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    assert_eq!(json["agents"][0]["agentId"], "agent-003");
+    assert_eq!(
+        json["agents"][0]["workspace"],
+        specialist_root
+            .canonicalize()?
+            .to_string_lossy()
+            .to_string()
+    );
+    assert_eq!(
+        json["agents"][0]["sourceRoots"],
+        serde_json::json!([source_root.join("corpus").canonicalize()?])
+    );
+
+    codex_command(&manager_root)?
+        .args(["manager", "agents", "pause", "agent-003"])
+        .assert()
+        .success();
+    let updated: Value = serde_json::from_slice(&fs::read(manager_root.join("agents.json"))?)?;
+    assert_eq!(updated["agents"][0]["lifecycleState"], "paused");
+    assert!(!manager_root.join("agents.tsv").exists());
+
+    Ok(())
+}
+
+#[test]
+fn manager_agents_source_audit_snapshots_and_compares() -> Result<(), Box<dyn std::error::Error>> {
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
+
+    let baseline_output = codex_command(&manager_root)?
+        .args([
+            "manager",
+            "agents",
+            "source-audit",
+            "--output",
+            "source-baseline.json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let baseline_stdout = String::from_utf8(baseline_output)?;
+    assert!(baseline_stdout.contains("Wrote source audit"));
+    let baseline: Value =
+        serde_json::from_slice(&fs::read(manager_root.join("source-baseline.json"))?)?;
+    assert_eq!(baseline["roots"][0]["agentId"], "agent-003");
+    assert_eq!(baseline["roots"][0]["kind"], "directory");
+    assert_eq!(baseline["roots"][0]["fileCount"], 1);
+    assert_eq!(baseline["comparison"], Value::Null);
+
+    let clean_compare_output = codex_command(&manager_root)?
+        .args([
+            "manager",
+            "agents",
+            "source-audit",
+            "--compare",
+            "source-baseline.json",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let clean_compare: Value = serde_json::from_slice(&clean_compare_output)?;
+    assert_eq!(clean_compare["comparison"]["changed"], false);
+    assert_eq!(clean_compare["comparison"]["unchangedRoots"], 1);
+
+    fs::write(source_root.join("corpus/case-file.md"), "source changed")?;
+    let changed_compare_output = codex_command(&manager_root)?
+        .args([
+            "manager",
+            "agents",
+            "source-audit",
+            "--compare",
+            "source-baseline.json",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let changed_compare: Value = serde_json::from_slice(&changed_compare_output)?;
+    assert_eq!(changed_compare["comparison"]["changed"], true);
+    assert_eq!(
+        changed_compare["comparison"]["changedRoots"]
+            .as_array()
+            .expect("changedRoots array")
+            .len(),
+        1
+    );
+
+    Ok(())
+}
+
+#[test]
+fn manager_dashboard_generates_from_registry() -> Result<(), Box<dyn std::error::Error>> {
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    fs::write(
+        manager_root.join("pings/event-1.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "eventId": "event-1",
+            "agentId": "agent-003",
+            "workspace": specialist_root,
+            "eventType": "waiting-continuation",
+            "severity": "info",
+            "summary": "Ready for continuation",
+            "createdAt": 1,
+            "completedOutputs": [],
+            "recommendedNext": "Continue.",
+            "contextLevel": null,
+            "approvalGate": "plain-continuation",
+            "needsUser": false,
+            "sourceGaps": []
+        }))?,
+    )?;
+    fs::create_dir_all(manager_root.join("pings/acks"))?;
+    fs::write(
+        manager_root.join("pings/acks/event-1.ack"),
+        "event_id=event-1\nagent_id=agent-003\ndecision=would-auto-continue\n",
+    )?;
+
+    let output = codex_command(&manager_root)?
+        .args(["manager", "dashboard", "--output", "manager_dashboard.md"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output)?;
+    assert!(stdout.contains("Wrote dashboard"));
+
+    let dashboard = fs::read_to_string(manager_root.join("manager_dashboard.md"))?;
+    assert!(dashboard.contains("# Manager Dashboard"));
+    assert!(dashboard.contains(
+        "| agent-003 | working | actively-managing | unknown | agent-003 | Continue NOI work |"
+    ));
+    assert!(dashboard.contains("## Event Rollup"));
+    assert!(dashboard.contains("- Structured events: 1"));
+    assert!(dashboard.contains("  - waiting-continuation: 1"));
+    assert!(dashboard.contains("  - would-auto-continue: 1"));
+
+    Ok(())
+}
+
+#[test]
+fn manager_process_events_dry_run_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    fs::write(
+        manager_root.join("pings/plain.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "eventId": "plain",
+            "agentId": "agent-003",
+            "workspace": specialist_root,
+            "eventType": "waiting-continuation",
+            "severity": "info",
+            "summary": "Ready for continuation",
+            "createdAt": 1,
+            "completedOutputs": [],
+            "recommendedNext": "Continue the bounded fixture.",
+            "contextLevel": "medium",
+            "approvalGate": "plain-continuation",
+            "needsUser": false,
+            "sourceGaps": []
+        }))?,
+    )?;
+    fs::write(
+        manager_root.join("pings/matter-id.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "eventId": "matter-id",
+            "agentId": "matter",
+            "workspace": specialist_root,
+            "eventType": "waiting-continuation",
+            "severity": "info",
+            "summary": "Ready for continuation from workspace id",
+            "createdAt": 1,
+            "completedOutputs": [],
+            "recommendedNext": "Continue the bounded fixture.",
+            "contextLevel": "medium",
+            "approvalGate": "plain-continuation",
+            "needsUser": false,
+            "sourceGaps": []
+        }))?,
+    )?;
+    fs::write(
+        manager_root.join("pings/needs-user.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "eventId": "needs-user",
+            "agentId": "agent-003",
+            "workspace": specialist_root,
+            "eventType": "needs-user",
+            "severity": "warning",
+            "summary": "Needs direction",
+            "createdAt": 2,
+            "completedOutputs": [],
+            "recommendedNext": "Choose the next source set.",
+            "contextLevel": null,
+            "approvalGate": "needs-user",
+            "needsUser": true,
+            "sourceGaps": []
+        }))?,
+    )?;
+    fs::write(
+        manager_root.join("pings/blocked-alternative.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "eventId": "blocked-alternative",
+            "agentId": "agent-003",
+            "workspace": specialist_root,
+            "eventType": "blocked",
+            "severity": "warning",
+            "summary": "Blocked on one source bundle",
+            "createdAt": 3,
+            "completedOutputs": [],
+            "recommendedNext": null,
+            "contextLevel": "medium",
+            "approvalGate": "blocked",
+            "needsUser": false,
+            "sourceGaps": ["Missing source bundle"],
+            "blockedAlternative": {
+                "recommendedNext": "Continue the independent citation audit.",
+                "approvalGate": "plain-continuation",
+                "contextLevel": "medium"
+            }
+        }))?,
+    )?;
+
+    let first_output = codex_command(&manager_root)?
+        .args(["manager", "process-events", "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first_stdout = String::from_utf8(first_output)?;
+    assert!(
+        first_stdout.contains(
+            "event_id=blocked-alternative agent_id=agent-003 decision=would-auto-continue"
+        )
+    );
+    assert!(
+        first_stdout.contains("event_id=plain agent_id=agent-003 decision=would-auto-continue")
+    );
+    assert!(
+        first_stdout.contains("event_id=matter-id agent_id=agent-003 decision=would-auto-continue")
+    );
+    assert!(first_stdout.contains("event_id=needs-user agent_id=agent-003 decision=escalated"));
+    assert!(
+        manager_root
+            .join("pings/acks/blocked-alternative.ack")
+            .is_file()
+    );
+    assert!(manager_root.join("pings/acks/plain.ack").is_file());
+    assert!(manager_root.join("pings/acks/matter-id.ack").is_file());
+    assert!(manager_root.join("pings/acks/needs-user.ack").is_file());
+
+    let second_output = codex_command(&manager_root)?
+        .args(["manager", "process-events", "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second_stdout = String::from_utf8(second_output)?;
+    assert!(
+        second_stdout.contains(
+            "event_id=blocked-alternative agent_id=agent-003 decision=already-acknowledged"
+        )
+    );
+    assert!(
+        second_stdout.contains("event_id=plain agent_id=agent-003 decision=already-acknowledged")
+    );
+    assert!(
+        second_stdout
+            .contains("event_id=matter-id agent_id=agent-003 decision=already-acknowledged")
+    );
+    assert!(
+        second_stdout
+            .contains("event_id=needs-user agent_id=agent-003 decision=already-acknowledged")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn manager_observers_list_and_open_dry_run() -> Result<(), Box<dyn std::error::Error>> {
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+
+    let output = codex_command(&manager_root)?
+        .args(["manager", "observers", "list", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output)?;
+    assert_eq!(json["observers"][0]["agentId"], "agent-003");
+    assert_eq!(json["observers"][0]["sessionId"], "agent-003");
+    assert_eq!(json["observers"][0]["observerWindowStatus"], "missing");
+    assert_eq!(
+        json["observers"][0]["attachCommand"],
+        "tmux -L test-socket attach-session -t agent-003"
+    );
+
+    let output = codex_command(&manager_root)?
+        .args(["manager", "observers", "open", "agent-003", "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output)?;
+    assert_eq!(
+        stdout.trim(),
+        "tmux -L test-socket attach-session -t agent-003"
+    );
 
     Ok(())
 }
@@ -183,6 +657,71 @@ fn manager_worker_prompt_dry_run_uses_specialist_worker_protocol()
     assert!(stdout.contains("worker turn completed command_id="));
     assert!(stdout.contains("final_message=dry-run prompt accepted"));
     assert!(stdout.contains("worker needs direction command_id="));
+
+    Ok(())
+}
+
+#[test]
+fn manager_worker_prompt_ack_json_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
+    let codex_home = TempDir::new()?;
+    let tempdir = TempDir::new()?;
+    let manager_root = tempdir.path().join("manager");
+    let specialist_root = tempdir.path().join("specialist");
+    let source_root = tempdir.path().join("source");
+    let analysis_root = tempdir.path().join("analysis");
+    let message_file = tempdir.path().join("message.txt");
+    write_manager_workspace(&manager_root, &specialist_root)?;
+    write_specialist_workspace(&specialist_root, &source_root, &analysis_root)?;
+    fs::write(&message_file, "Continue from the safe message file.\n")?;
+
+    let codex_bin = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let args = [
+        "manager",
+        "--specialist-codex-bin",
+        codex_bin.to_str().expect("utf8 temp path"),
+        "worker-prompt",
+        "--dry-run",
+        "--ack-json",
+        "--idempotency-key",
+        "fixture-key",
+        "--message-file",
+        message_file.to_str().expect("utf8 temp path"),
+        "agent-003",
+    ];
+    let first_output = codex_command_with_home(&codex_home, &manager_root)?
+        .args(args)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second_output = codex_command_with_home(&codex_home, &manager_root)?
+        .args(args)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first: Value = serde_json::from_slice(&first_output)?;
+    let second: Value = serde_json::from_slice(&second_output)?;
+
+    assert_eq!(first["accepted"], true);
+    assert_eq!(first["started"], true);
+    assert_eq!(first["duplicate"], false);
+    assert_eq!(first["messageId"], "fixture-key");
+    assert_eq!(first["sessionId"], "agent-003");
+    assert_eq!(first["error"], Value::Null);
+    assert_eq!(second["accepted"], true);
+    assert_eq!(second["started"], true);
+    assert_eq!(second["duplicate"], true);
+    assert_eq!(second["messageId"], "fixture-key");
+    assert_eq!(second["sessionId"], "agent-003");
+    assert_eq!(second["error"], Value::Null);
+    assert!(
+        manager_root
+            .join(".codex-manager/message-acks/agent-003/fixture-key.json")
+            .is_file()
+    );
 
     Ok(())
 }

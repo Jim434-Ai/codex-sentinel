@@ -92,9 +92,55 @@ pub enum SpecialistError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to read context snapshot at {path}: {source}")]
+    ReadContextSnapshot {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse context snapshot JSON at {path}: {source}")]
+    ParseContextSnapshot {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("failed to create context snapshot directory {path}: {source}")]
+    CreateContextSnapshotDirectory {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to write context snapshot at {path}: {source}")]
+    WriteContextSnapshot {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to create specialist event directory {path}")]
+    CreateEventDirectory {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to serialize specialist event JSON")]
+    SerializeEventJson {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("failed to write specialist event file {path}")]
+    WriteEvent {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 
     #[error("failed to serialize checkpoint JSON: {source}")]
     SerializeCheckpointJson {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("failed to serialize context snapshot JSON")]
+    SerializeContextSnapshotJson {
         #[source]
         source: serde_json::Error,
     },

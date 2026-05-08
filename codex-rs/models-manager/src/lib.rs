@@ -27,3 +27,26 @@ pub fn client_version_to_whole() -> String {
         env!("CARGO_PKG_VERSION_PATCH")
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::client_version_to_whole;
+
+    #[test]
+    fn client_version_satisfies_current_model_catalog_gate() {
+        let client_version = parse_version(&client_version_to_whole());
+        assert!(
+            client_version >= (0, 98, 0),
+            "client_version sent to /models must satisfy current target model minimum"
+        );
+    }
+
+    fn parse_version(version: &str) -> (u32, u32, u32) {
+        let parts = version
+            .split('.')
+            .map(|part| part.parse::<u32>().expect("numeric version part"))
+            .collect::<Vec<_>>();
+        assert_eq!(parts.len(), 3);
+        (parts[0], parts[1], parts[2])
+    }
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openai.local/codex/schemas/specialist_event.schema.json",
+  "title": "Codex Specialist Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "agentId",
+    "workspace",
+    "eventType",
+    "severity",
+    "summary",
+    "createdAt",
+    "completedOutputs",
+    "recommendedNext",
+    "contextLevel",
+    "approvalGate",
+    "needsUser",
+    "sourceGaps"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agentId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workspace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "started",
+        "checkpoint-written",
+        "artifact-created",
+        "done",
+        "waiting-continuation",
+        "needs-user",
+        "blocked",
+        "error",
+        "low-context",
+        "recommendation-ready"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "error",
+        "critical"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "integer"
+    },
+    "completedOutputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactPath",
+          "artifactType",
+          "version",
+          "sourceBasis",
+          "verificationStatus"
+        ],
+        "properties": {
+          "artifactPath": {
+            "type": "string"
+          },
+          "artifactType": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceBasis": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verificationStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "recommendedNext": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contextLevel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "approvalGate": {
+      "type": "string",
+      "enum": [
+        "plain-continuation",
+        "needs-user",
+        "external-facing",
+        "source-edit",
+        "strategy",
+        "broad-low-context",
+        "blocked"
+      ]
+    },
+    "needsUser": {
+      "type": "boolean"
+    },
+    "sourceGaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blockedAlternative": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "recommendedNext",
+        "approvalGate",
+        "contextLevel"
+      ],
+      "properties": {
+        "recommendedNext": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approvalGate": {
+          "type": "string",
+          "enum": [
+            "plain-continuation",
+            "needs-user",
+            "external-facing",
+            "source-edit",
+            "strategy",
+            "broad-low-context",
+            "blocked"
+          ]
+        },
+        "contextLevel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
